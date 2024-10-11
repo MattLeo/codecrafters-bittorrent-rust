@@ -1,4 +1,3 @@
-use hex::decode;
 use serde_json;
 use std::env;
 
