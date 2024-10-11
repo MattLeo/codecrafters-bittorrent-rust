@@ -16,18 +16,37 @@ fn decode_bencoded_value(encoded_value: &str) -> serde_json::Value {
     } else if ident == 'l' {
         let mut list = Vec::new();
         let mut rest = &encoded_value[1..];
-        while rest.chars().next().unwrap() != 'e' {
+        while !rest.starts_with('e') {
             let item = decode_bencoded_value(rest);
-            let length = match &item {
-                serde_json::Value::String(s) => s.len() + rest.find(':').unwrap() + 1,
-                serde_json::Value::Number(_) => rest.find('e').unwrap() + 1,
-                serde_json::Value::Array(_) => rest.find('e').unwrap() + 1,
-                _ => panic!("Unhandled value type"),
-            };
+            let length = calculate_consumed_length(rest);
             list.push(item);
             rest = &rest[length..];
         }
         serde_json::Value::Array(list)
+    } else {
+        panic!("Unhandled encoded value: {}", encoded_value);
+    }
+}
+
+fn calculate_consumed_length(encoded_value: &str) -> usize {
+    let ident = encoded_value.chars().next().unwrap();
+
+    if ident.is_digit(10) {
+        let colon_index = encoded_value.find(':').unwrap();
+        let number = encoded_value[..colon_index].parse::<usize>().unwrap();
+        colon_index + 1 + number
+    } else if ident == 'i' {
+        let e_index = encoded_value.find('e').unwrap();
+        e_index + 1
+    } else if ident == 'l' {
+        let mut rest = &encoded_value[1..];
+        let mut consumed = 1;
+        while !rest.starts_with('e') {
+            let length = calculate_consumed_length(rest);
+            rest = &rest[length..];
+            consumed += length;
+        }
+        consumed + 1
     } else {
         panic!("Unhandled encoded value: {}", encoded_value);
     }
