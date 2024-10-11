@@ -26,9 +26,9 @@ fn decode_bencoded_value(encoded_value: &str) -> serde_json::Value {
         while rest.chars().next().unwrap() != 'e' {
             let item = decode_bencoded_value(rest);
             let consumed = match item {
-                serde_json::Value(ref s) => s.len() + rest.find(':').unwrap() + 1,
+                serde_json::Value::String(ref s) => s.len() + rest.find(':').unwrap() + 1,
                 serde_json::Value::Number(_) => rest.find('e').unwrap() + 1,
-                serde_json::Value::Array(_) => reset.find('e').unwrap() + 1,
+                serde_json::Value::Array(_) => rest.find('e').unwrap() + 1,
                 _=>panic!("Unhandled value type"),
             };
             list.push(item);
