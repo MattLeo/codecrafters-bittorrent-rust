@@ -71,11 +71,11 @@ fn calculate_consumed_length(encoded_value: &str) -> usize {
         let mut consumed = 1;
         while !rest.starts_with('e') {
             let length =  calculate_consumed_length(rest);
-            consumed += length;
             rest = &rest[length..];
+            consumed += length;
             let length = calculate_consumed_length(rest);
-            consumed += length;
             rest = &rest[length..];
+            consumed += length;
         }
         consumed + 1
     } else {
