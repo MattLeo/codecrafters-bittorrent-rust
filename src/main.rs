@@ -3,6 +3,7 @@ use std::{env, path::PathBuf, fs::File, io::Read};
 use reqwest::Url;
 
 #[allow(dead_code)]
+
 struct Torrent {
     announce: reqwest::Url,
     info: TorrentInfo
@@ -51,10 +52,11 @@ where
                     .ok_or("Missing or invalid 'pieces length'")?,
                 pieces: info_dict
                     .get("pieces")
-                    .and_then(|v| v.as_str())
-                    .ok_or("Invalid or missing 'pieces'")?
-                    .as_bytes()
-                    .to_vec(),
+                    .and_then(|v| v.as_array())
+                    .ok_or("Invalid or missing 'peices'")?
+                    .iter()
+                    .filter_map(|v| v.as_u64().map(|b| b as u8))
+                    .collect::<Vec<u8>>()
             }
         } else {
             return Err("Invalid 'info' section".into());
