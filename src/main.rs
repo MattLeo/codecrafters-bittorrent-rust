@@ -89,7 +89,7 @@ where
 
     Ok(Torrent {
         announce: announce_url,
-        info,
+        info: info,
         raw_hash: raw_info_hash,
     })
 }
