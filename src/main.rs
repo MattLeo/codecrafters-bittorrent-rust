@@ -31,7 +31,7 @@ fn decode_bencoded_value(encoded_value: &str) -> serde_json::Value {
             let key = decode_bencoded_value(rest);
             let key = match key {
                 serde_json::Value::String(key) => key,
-                key => {
+                _key => {
                     panic!("Dictionary keys must be Strings");
                 }
             };
