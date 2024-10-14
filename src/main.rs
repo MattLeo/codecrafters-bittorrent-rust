@@ -23,6 +23,25 @@ fn decode_bencoded_value(encoded_value: &str) -> serde_json::Value {
             rest = &rest[length..];
         }
         serde_json::Value::Array(list)
+    } else if ident == 'd' {
+        let mut dict = serde_json::Map::new();
+        let mut rest = &encoded_value[1..];
+        while !rest.starts_with('e') && !rest.is_empty() {
+            let length = calculate_consumed_length(rest);
+            let key = decode_bencoded_value(rest);
+            let key = match key {
+                serde_json::Value::String(key) => key,
+                key => {
+                    panic!("Dictionary keys must be Strings");
+                }
+            };
+            rest = &rest[length..];
+            let length = calculate_consumed_length(rest);
+            let val = decode_bencoded_value(rest);
+            dict.insert(key, val);
+            rest[length..];
+        }
+        dict
     } else {
         panic!("Unhandled encoded value: {}", encoded_value);
     }
