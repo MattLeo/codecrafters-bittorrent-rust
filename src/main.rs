@@ -15,8 +15,9 @@ struct Torrent {
 struct TorrentInfo {
     length: i64,
     name: String,
-    pieces_length: i64,
-    pieces: Vec<u8>
+    #[serde(rename = "piece length")]
+    piece_length: i64,
+    pieces: Vec<u8>,
 }
 
 fn parse_torrent<T>(file_name: T) -> Result<Torrent, Box<dyn std::error::Error>>
@@ -50,7 +51,7 @@ where
                     .and_then(|v| v.as_str())
                     .ok_or("Missing or invalid 'name'")?
                     .to_string(),
-                pieces_length: info_dict
+                piece_length: info_dict
                     .get("piece length")
                     .and_then(|v| v.as_i64())
                     .ok_or("Missing or invalid 'pieces length'")?,
