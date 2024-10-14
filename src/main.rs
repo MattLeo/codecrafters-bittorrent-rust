@@ -2,6 +2,7 @@ use serde_json;
 use std::{env, path::PathBuf, fs::File, io::Read};
 use reqwest::Url;
 
+#[allow(dead_code)]
 struct Torrent {
     announce: reqwest::Url,
     info: TorrentInfo
@@ -20,7 +21,7 @@ where
     let mut file = File::open(file_name.into())?;
     let mut encoded_value= Vec::new();
     file.read_to_end(&mut encoded_value)?;
-    let data = decode_bencoded_value(&String::from_utf8(encoded_value)?).0;
+    let data = decode_bencoded_value(&encoded_value).0;
 
     let announce_url = if let Some(url_value) = data.get("announce") {
         if let Some(url_str) = url_value.as_str() {
@@ -68,25 +69,35 @@ where
     })
 }
 
-fn decode_bencoded_value(encoded_value: &str) -> (serde_json::Value, usize) {
-    let ident = encoded_value.chars().next().unwrap();
+fn decode_bencoded_value(encoded_value: &[u8]) -> (serde_json::Value, usize) {
+    let ident = encoded_value[0] as char;
 
     if ident.is_digit(10) {
-        let colon_index = encoded_value.find(':').unwrap();
-        let number = encoded_value[..colon_index].parse::<usize>().unwrap();
+        let colon_index = encoded_value.iter().position(|&b| b == b':').unwrap();
+        let number = std::str::from_utf8(&encoded_value[..colon_index])
+            .unwrap()
+            .parse::<usize>()
+            .unwrap();
         let consumed = colon_index + 1 + number;
         let string = &encoded_value[colon_index + 1..consumed];
-        (serde_json::Value::String(string.to_string()), consumed)
+        if let Ok(utf8_string) = std::str::from_utf8(string) {
+        (serde_json::Value::String(utf8_string.to_string()), consumed)
+        } else {
+            (serde_json::Value::Array(string.iter().map(|&b| serde_json::Value::Number(b.into())).collect()), consumed)
+        }
     } else if ident == 'i' {
-        let e_index = encoded_value.find('e').unwrap();
-        let number = encoded_value[1..e_index].parse::<i64>().unwrap();
+        let e_index = encoded_value.iter().position(|&b| b == b'e').unwrap();
+        let number = std::str::from_utf8(&encoded_value[1..e_index])
+            .unwrap()
+            .parse::<i64>()
+            .unwrap();
         let consumed = e_index + 1;
         (serde_json::Value::Number(serde_json::Number::from(number)), consumed)
     } else if ident == 'l' {
         let mut list = Vec::new();
         let mut rest = &encoded_value[1..];
-        let mut consumed: usize = 1;
-        while !rest.starts_with('e') {
+        let mut consumed= 1;
+        while rest[0] != b'e' {
             let (item,length) = decode_bencoded_value(rest);
             list.push(item);
             rest = &rest[length..];
@@ -98,7 +109,7 @@ fn decode_bencoded_value(encoded_value: &str) -> (serde_json::Value, usize) {
         let mut dict = serde_json::Map::new();
         let mut rest = &encoded_value[1..];
         let mut consumed = 1;
-        while !rest.starts_with('e') && !rest.is_empty() {
+        while rest[0] != b'e' {
             let (key, key_length) = decode_bencoded_value(rest);
             let key = match key {
                 serde_json::Value::String(key) => key,
@@ -116,7 +127,7 @@ fn decode_bencoded_value(encoded_value: &str) -> (serde_json::Value, usize) {
         consumed += 1;
         (serde_json::Value::Object(dict), consumed)
     } else {
-        panic!("Unhandled encoded value: {}", encoded_value);
+        panic!("Unhandled encoded value");
     }
 }
 
@@ -130,7 +141,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let command = &args[1];
 
     if command == "decode" {
-        let encoded_value = &args[2];
+        let encoded_value = &args[2].as_bytes();
         let decoded_value = decode_bencoded_value(encoded_value);
         println!("{}", decoded_value.0);
     } else if command == "info" {
