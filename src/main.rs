@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 struct Torrent {
     announce: reqwest::Url,
     info: TorrentInfo,
+    raw_hash: String,
 }
 
 
@@ -21,6 +22,17 @@ struct TorrentInfo {
     #[serde(rename = "piece length")]
     piece_length: i64,
     pieces: Vec<u8>,
+}
+
+fn extract_info_hash(encoded_value: &[u8]) -> Result<String, Box<dyn std::error::Error>> {
+    let info_start = encoded_value.windows(5).position(|w| w == b"4:info").ok_or("Info section not found")?;
+    let info_end = encoded_value.iter().position(|&b| b == b'e').ok_or("End of info section not found")?;
+    let info_bytes = &encoded_value[info_start..=info_end];
+
+    let mut hasher = Sha1::new();
+    hasher.update(info_bytes);
+    let hash = hasher.finalize();
+    Ok(hex::encode(hash))
 }
 
 fn parse_torrent<T>(file_name: T) -> Result<Torrent, Box<dyn std::error::Error>>
@@ -41,6 +53,8 @@ where
     } else {
         return Err("announce URL not found".into());
     };
+
+    let raw_info_hash = extract_info_hash(&encoded_value)?;
 
     let info = if let Some(info_value) = data.get("info") {
         if let serde_json::Value::Object(info_dict) = info_value {
@@ -75,7 +89,8 @@ where
 
     Ok(Torrent {
         announce: announce_url,
-        info
+        info,
+        raw_hash: raw_info_hash,
     })
 }
 
@@ -165,7 +180,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         println!("Tracker URL: {}", torrent.announce);
         println!("Length: {}", torrent.info.length);
-        println!("Info Hash: {}", hash)
+        println!("Info Hash: {}", hash);
+        println!("Original Info Hash {}", torrent.raw_hash);
     } else {
         eprintln!("unknown command: {}", command);
     }
