@@ -39,9 +39,9 @@ fn decode_bencoded_value(encoded_value: &str) -> serde_json::Value {
             let length = calculate_consumed_length(rest);
             let val = decode_bencoded_value(rest);
             dict.insert(key, val);
-            rest[length..];
+            rest = &rest[length..];
         }
-        serde_jsom::Value::Map(dict)
+        serde_json::Value::Object(dict)
     } else {
         panic!("Unhandled encoded value: {}", encoded_value);
     }
