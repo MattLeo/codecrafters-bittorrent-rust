@@ -1,102 +1,146 @@
 use serde_json;
-use std::env;
+use std::{env, path::PathBuf, fs::File, io::Read};
+use reqwest::Url;
 
-fn decode_bencoded_value(encoded_value: &str) -> serde_json::Value {
+struct Torrent {
+    announce: reqwest::Url,
+    info: TorrentInfo
+}
+struct TorrentInfo {
+    length: i64,
+    name: String,
+    pieces_length: i64,
+    pieces: Vec<u8>
+}
+
+fn parse_torrent<T>(file_name: T) -> Result<Torrent, Box<dyn std::error::Error>>
+where
+    T: Into<PathBuf>,
+{
+    let mut file = File::open(file_name.into())?;
+    let mut encoded_value= Vec::new();
+    file.read_to_end(&mut encoded_value)?;
+    let data = decode_bencoded_value(&String::from_utf8(encoded_value)?).0;
+
+    let announce_url = if let Some(url_value) = data.get("announce") {
+        if let Some(url_str) = url_value.as_str() {
+            Url::parse(url_str)?
+        } else {
+            return Err("announce URL is not a valid string".into());
+        }
+    } else {
+        return Err("announce URL not found".into());
+    };
+
+    let info = if let Some(info_value) = data.get("info") {
+        if let serde_json::Value::Object(info_dict) = info_value {
+            TorrentInfo {
+                length: info_dict
+                    .get("length")
+                    .and_then(|v| v.as_i64())
+                    .ok_or("Missing or invalid 'length'")?,
+                name: info_dict
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .ok_or("Missing or invalid 'name'")?
+                    .to_string(),
+                pieces_length: info_dict
+                    .get("piece length")
+                    .and_then(|v| v.as_i64())
+                    .ok_or("Missing or invalid 'pieces length'")?,
+                pieces: info_dict
+                    .get("pieces")
+                    .and_then(|v| v.as_str())
+                    .ok_or("Invalid or missing 'pieces'")?
+                    .as_bytes()
+                    .to_vec(),
+            }
+        } else {
+            return Err("Invalid 'info' section".into());
+        }
+    } else {
+        return Err("'info' section missing".into());
+    };
+
+    Ok(Torrent {
+        announce: announce_url,
+        info
+    })
+}
+
+fn decode_bencoded_value(encoded_value: &str) -> (serde_json::Value, usize) {
     let ident = encoded_value.chars().next().unwrap();
 
     if ident.is_digit(10) {
         let colon_index = encoded_value.find(':').unwrap();
         let number = encoded_value[..colon_index].parse::<usize>().unwrap();
-        let string = &encoded_value[colon_index + 1..colon_index + 1 + number];
-        serde_json::Value::String(string.to_string())
+        let consumed = colon_index + 1 + number;
+        let string = &encoded_value[colon_index + 1..consumed];
+        (serde_json::Value::String(string.to_string()), consumed)
     } else if ident == 'i' {
         let e_index = encoded_value.find('e').unwrap();
         let number = encoded_value[1..e_index].parse::<i64>().unwrap();
-        serde_json::Value::Number(serde_json::Number::from(number))
+        let consumed = e_index + 1;
+        (serde_json::Value::Number(serde_json::Number::from(number)), consumed)
     } else if ident == 'l' {
         let mut list = Vec::new();
         let mut rest = &encoded_value[1..];
+        let mut consumed: usize = 1;
         while !rest.starts_with('e') {
-            let item = decode_bencoded_value(rest);
-            let length = calculate_consumed_length(rest);
+            let (item,length) = decode_bencoded_value(rest);
             list.push(item);
             rest = &rest[length..];
+            consumed += length;
         }
-        serde_json::Value::Array(list)
+        consumed += 1;
+        (serde_json::Value::Array(list), consumed)
     } else if ident == 'd' {
         let mut dict = serde_json::Map::new();
         let mut rest = &encoded_value[1..];
+        let mut consumed = 1;
         while !rest.starts_with('e') && !rest.is_empty() {
-            let length = calculate_consumed_length(rest);
-            let key = decode_bencoded_value(rest);
+            let (key, key_length) = decode_bencoded_value(rest);
             let key = match key {
                 serde_json::Value::String(key) => key,
                 _key => {
                     panic!("Dictionary keys must be Strings");
                 }
             };
-            rest = &rest[length..];
-            let length = calculate_consumed_length(rest);
-            let val = decode_bencoded_value(rest);
+            rest = &rest[key_length..];
+            consumed += key_length;
+            let (val, val_length) = decode_bencoded_value(rest);
             dict.insert(key, val);
-            rest = &rest[length..];
+            rest = &rest[val_length..];
+            consumed += val_length;
         }
-        serde_json::Value::Object(dict)
-    } else {
-        panic!("Unhandled encoded value: {}", encoded_value);
-    }
-}
-
-fn calculate_consumed_length(encoded_value: &str) -> usize {
-    let ident = encoded_value.chars().next().unwrap();
-
-    if ident.is_digit(10) {
-        let colon_index = encoded_value.find(':').unwrap();
-        let number = encoded_value[..colon_index].parse::<usize>().unwrap();
-        colon_index + 1 + number
-    } else if ident == 'i' {
-        let e_index = encoded_value.find('e').unwrap();
-        e_index + 1
-    } else if ident == 'l' {
-        let mut rest = &encoded_value[1..];
-        let mut consumed = 1;
-        while !rest.starts_with('e') {
-            let length = calculate_consumed_length(rest);
-            rest = &rest[length..];
-            consumed += length;
-        }
-        consumed + 1
-    } else if ident == 'd' {
-        let mut rest = &encoded_value[1..];
-        let mut consumed = 1;
-        while !rest.starts_with('e') {
-            let length =  calculate_consumed_length(rest);
-            rest = &rest[length..];
-            consumed += length;
-            let length = calculate_consumed_length(rest);
-            rest = &rest[length..];
-            consumed += length;
-        }
-        consumed + 1
+        consumed += 1;
+        (serde_json::Value::Object(dict), consumed)
     } else {
         panic!("Unhandled encoded value: {}", encoded_value);
     }
 }
 
 // Usage: your_bittorrent.sh decode "<encoded_value>"
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
         eprintln!("Usage: {} decode <encoded_value>", args[0]);
-        return;
+        return Ok(());
     }
     let command = &args[1];
 
     if command == "decode" {
         let encoded_value = &args[2];
         let decoded_value = decode_bencoded_value(encoded_value);
-        println!("{}", decoded_value);
+        println!("{}", decoded_value.0);
+    } else if command == "info" {
+        let file_name = &args[2];
+        let torrent = parse_torrent(file_name)?;
+        println!("Tracker URL: {}", torrent.announce);
+        println!("Length: {}", torrent.info.length);
     } else {
         eprintln!("unknown command: {}", command);
     }
+
+    Ok(())
 }
