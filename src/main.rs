@@ -41,7 +41,7 @@ fn decode_bencoded_value(encoded_value: &str) -> serde_json::Value {
             dict.insert(key, val);
             rest[length..];
         }
-        dict
+        serde_jsom::Value::Map(dict)
     } else {
         panic!("Unhandled encoded value: {}", encoded_value);
     }
