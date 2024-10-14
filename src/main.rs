@@ -1,6 +1,9 @@
 use serde_json;
 use std::{env, path::PathBuf, fs::File, io::Read};
 use reqwest::Url;
+use sha1::{Sha1, Digest};
+use serde_bencode::ser;
+use serde::{Serialize};
 
 #[allow(dead_code)]
 
@@ -8,6 +11,7 @@ struct Torrent {
     announce: reqwest::Url,
     info: TorrentInfo
 }
+#[derive(Serialize)]
 struct TorrentInfo {
     length: i64,
     name: String,
@@ -149,8 +153,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else if command == "info" {
         let file_name = &args[2];
         let torrent = parse_torrent(file_name)?;
+        let bencoded = ser::to_bytes(&torrent.info)?;
+        let mut hasher = Sha1::new();
+        hasher.update(&bencoded);
+        let result = hasher.finalize();
+        let hash = hex::encode(result);
+
         println!("Tracker URL: {}", torrent.announce);
         println!("Length: {}", torrent.info.length);
+        println!("Info Hash: {}", hash)
     } else {
         eprintln!("unknown command: {}", command);
     }
