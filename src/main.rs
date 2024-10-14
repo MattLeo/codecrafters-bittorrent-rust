@@ -3,15 +3,18 @@ use std::{env, path::PathBuf, fs::File, io::Read};
 use reqwest::Url;
 use sha1::{Sha1, Digest};
 use serde_bencode::ser;
-use serde::{Serialize};
+use serde::{Deserialize, Serialize};
 
 #[allow(dead_code)]
 
+
 struct Torrent {
     announce: reqwest::Url,
-    info: TorrentInfo
+    info: TorrentInfo,
 }
-#[derive(Serialize)]
+
+
+#[derive(Serialize, Deserialize)]
 struct TorrentInfo {
     length: i64,
     name: String,
