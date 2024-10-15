@@ -11,9 +11,7 @@ use serde::{Deserialize, Serialize};
 struct Torrent {
     announce: reqwest::Url,
     info: TorrentInfo,
-    raw_hash: String,
 }
-
 
 #[derive(Serialize, Deserialize)]
 struct TorrentInfo {
@@ -22,17 +20,6 @@ struct TorrentInfo {
     #[serde(rename = "piece length")]
     piece_length: i64,
     pieces: Vec<u8>,
-}
-
-fn extract_info_hash(encoded_value: &[u8]) -> Result<String, Box<dyn std::error::Error>> {
-    let info_start = encoded_value.windows(5).position(|w| w == b"4:info").ok_or("Info section not found")?;
-    let info_end = encoded_value.iter().position(|&b| b == b'e').ok_or("End of info section not found")?;
-    let info_bytes = &encoded_value[info_start..=info_end];
-
-    let mut hasher = Sha1::new();
-    hasher.update(info_bytes);
-    let hash = hasher.finalize();
-    Ok(hex::encode(hash))
 }
 
 fn parse_torrent<T>(file_name: T) -> Result<Torrent, Box<dyn std::error::Error>>
@@ -54,7 +41,6 @@ where
         return Err("announce URL not found".into());
     };
 
-    let raw_info_hash = extract_info_hash(&encoded_value)?;
 
     let info = if let Some(info_value) = data.get("info") {
         if let serde_json::Value::Object(info_dict) = info_value {
@@ -74,11 +60,10 @@ where
                     .ok_or("Missing or invalid 'pieces length'")?,
                 pieces: info_dict
                     .get("pieces")
-                    .and_then(|v| v.as_array())
+                    .and_then(|v| v.as_str())
                     .ok_or("Invalid or missing 'peices'")?
-                    .iter()
-                    .filter_map(|v| v.as_u64().map(|b| b as u8))
-                    .collect::<Vec<u8>>()
+                    .as_bytes()
+                    .to_vec(),
             }
         } else {
             return Err("Invalid 'info' section".into());
@@ -89,8 +74,7 @@ where
 
     Ok(Torrent {
         announce: announce_url,
-        info: info,
-        raw_hash: raw_info_hash,
+        info,
     })
 }
 
@@ -138,9 +122,7 @@ fn decode_bencoded_value(encoded_value: &[u8]) -> (serde_json::Value, usize) {
             let (key, key_length) = decode_bencoded_value(rest);
             let key = match key {
                 serde_json::Value::String(key) => key,
-                _key => {
-                    panic!("Dictionary keys must be Strings");
-                }
+                _ => return (serde_json::Value::Null, consumed)
             };
             rest = &rest[key_length..];
             consumed += key_length;
@@ -166,7 +148,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let command = &args[1];
 
     if command == "decode" {
-        let encoded_value = &args[2].as_bytes();
+        let encoded_value = args[2].as_bytes();
         let decoded_value = decode_bencoded_value(encoded_value);
         println!("{}", decoded_value.0);
     } else if command == "info" {
@@ -181,7 +163,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Tracker URL: {}", torrent.announce);
         println!("Length: {}", torrent.info.length);
         println!("Info Hash: {}", hash);
-        println!("Original Info Hash {}", torrent.raw_hash);
     } else {
         eprintln!("unknown command: {}", command);
     }
