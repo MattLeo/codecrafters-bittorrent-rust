@@ -9,12 +9,6 @@ use serde_json::Value;
 use serde_bytes::ByteBuf;
 
 #[derive(Debug, Serialize, Deserialize)]
-struct Torrent {
-    announce: String,
-    info: TorrentInfo,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 struct TorrentInfo {
     length: i64,
     name: String,
@@ -23,21 +17,28 @@ struct TorrentInfo {
     pieces: ByteBuf,
 }
 
-fn calculate_info_hash(info: &TorrentInfo) -> Result<String, Box<dyn std::error::Error>> {
-    let bencoded = serde_bencode::to_bytes(info)?;
-    let mut hasher = Sha1::new();
-    hasher.update(&bencoded);
-    let result = hasher.finalize();
-    Ok(hex::encode(result))
+#[derive(Debug, Serialize, Deserialize)]
+struct Torrent {
+    announce: String,
+    info: TorrentInfo,
 }
 
-fn parse_torrent<T: Into<PathBuf>>(file_name: T) -> Result<Torrent, Box<dyn std::error::Error>> {
-    let mut file = File::open(file_name.into())?;
-    let mut contents = Vec::new();
-    file.read_to_end(&mut contents)?;
-    
-    let torrent: Torrent = serde_bencode::from_bytes(&contents)?;
-    Ok(torrent)
+impl Torrent {
+    fn new<T: Into<PathBuf>>(file_name: T) -> Result<Torrent, Box<dyn std::error::Error>> {
+        let mut file = File::open(file_name.into())?;
+        let mut contents = Vec::new();
+        file.read_to_end(&mut contents)?;
+        let torrent: Torrent = serde_bencode::from_bytes(&contents)?;
+        Ok(torrent)
+    }
+
+    fn info_hash(&self) -> Result<String, Box<dyn std::error::Error>> {
+        let bencoded = serde_bencode::to_bytes(&self.info)?;
+        let mut hasher = Sha1::new();
+        hasher.update(&bencoded);
+        let result = hasher.finalize();
+        Ok(hex::encode(result))
+    }
 }
 
 fn decode_bencoded_value(encoded_value: &[u8]) -> Result<(Value, usize), Box<dyn std::error::Error>> {
@@ -103,8 +104,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("{}", serde_json::to_string(&decoded_value)?);
         },
         "info" => {
-            let torrent = parse_torrent(PathBuf::from(argument))?;
-            let info_hash = calculate_info_hash(&torrent.info)?;
+            let torrent = Torrent::new(PathBuf::from(argument))?;
+            let info_hash = torrent.info_hash()?;
             
             println!("Tracker URL: {}", torrent.announce);
             println!("Length: {}", torrent.info.length);
