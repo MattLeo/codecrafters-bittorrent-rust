@@ -109,6 +109,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Tracker URL: {}", torrent.announce);
             println!("Length: {}", torrent.info.length);
             println!("Info Hash: {}", info_hash);
+            println!("Peice Hashes:");
+            for hash in torrent.info.pieces {
+                println!("{}", hash);
+            }
         },
         _ => eprintln!("Unknown command: {}", command),
     }
