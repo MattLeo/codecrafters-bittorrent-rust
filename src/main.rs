@@ -113,7 +113,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match command.as_str() {
         "decode" => {
             let decoded_value = decode_bencoded_value(argument.as_bytes())?;
-            println!("{}", serde_json::Value::String(decoded_value.to_string()));
+            println!("{}", serde_json::to_string(&decoded_value)?);
         },
         "info" => {
             let torrent = parse_torrent(PathBuf::from(argument))?;
