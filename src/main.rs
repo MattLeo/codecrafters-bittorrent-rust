@@ -4,8 +4,8 @@ mod bencode;
 use std::env;
 use std::path::PathBuf;
 use sha1::{Sha1, Digest};
-use torrent::{Torrent, TorrentInfo, parse_torrent};
-use bencode::decode_bencoded_value;
+use crate::torrent::{Torrent, TorrentInfo, parse_torrent};
+use crate::bencode::decode_bencoded_value;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
