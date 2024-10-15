@@ -6,20 +6,21 @@ use std::str;
 use sha1::{Sha1, Digest};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use serde_bytes::ByteBuf;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Torrent {
     announce: String,
     info: TorrentInfo,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct TorrentInfo {
     length: i64,
     name: String,
     #[serde(rename = "piece length")]
     piece_length: i64,
-    pieces: Vec<u8>,
+    pieces: ByteBuf,
 }
 
 fn calculate_info_hash(info: &TorrentInfo) -> Result<String, Box<dyn std::error::Error>> {
