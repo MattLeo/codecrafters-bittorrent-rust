@@ -4,16 +4,8 @@ mod bencode;
 use std::env;
 use std::path::PathBuf;
 use sha1::{Sha1, Digest};
-use torrent::{Torrent, parse_torrent};
+use torrent::{Torrent, TorrentInfo, parse_torrent};
 use bencode::decode_bencoded_value;
-
-fn calculate_info_hash(info: &torrent::TorrentInfo) -> Result<String, Box<dyn std::error::Error>> {
-    let bencoded = serde_bencode::to_bytes(info)?;
-    let mut hasher = Sha1::new();
-    hasher.update(&bencoded);
-    let result = hasher.finalize();
-    Ok(hex::encode(result))
-}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
@@ -42,4 +34,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+fn calculate_info_hash(info: &TorrentInfo) -> Result<String, Box<dyn std::error::Error>> {
+    let bencoded = serde_bencode::to_bytes(info)?;
+    let mut hasher = Sha1::new();
+    hasher.update(&bencoded);
+    let result = hasher.finalize();
+    Ok(hex::encode(result))
 }
