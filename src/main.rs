@@ -40,12 +40,8 @@ fn parse_torrent<T: Into<PathBuf>>(file_name: T) -> Result<Torrent, Box<dyn std:
     Ok(torrent)
 }
 
-fn decode_bencoded_value(encoded_value: &[u8]) -> Result<Value, Box<dyn std::error::Error>> {
-    let (value, _) = decode_bencoded_value_inner(encoded_value)?;
-    Ok(value)
-}
-
-fn decode_bencoded_value_inner(encoded_value: &[u8]) -> Result<(Value, usize), Box<dyn std::error::Error>> {
+/* 
+fn decode_bencoded_value(encoded_value: &[u8]) -> Result<(Value, usize), Box<dyn std::error::Error>> {
     match encoded_value.get(0) {
         Some(b'i') => decode_integer(encoded_value),
         Some(b'l') => decode_list(encoded_value),
@@ -54,7 +50,55 @@ fn decode_bencoded_value_inner(encoded_value: &[u8]) -> Result<(Value, usize), B
         _ => Err("Invalid bencode format".into()),
     }
 }
+    */
 
+    fn decode_bencoded_value(encoded_value: &[u8]) -> Result<(Value, usize), Box<dyn std::error::Error>> {
+        match encoded_value.get(0) {
+            Some(b'i') => {
+                let end = encoded_value.iter().position(|&b| b == b'e')
+                    .ok_or("Invalid integer encoding")?;
+                let number = str::from_utf8(&encoded_value[1..end])?.parse::<i64>()?;
+                Ok((Value::Number(number.into()), end + 1))
+            }
+            Some(b'l') => {
+                let mut list = Vec::new();
+                let mut index = 1;
+                    while encoded_value[index] != b'e' {
+                        let (item, consumed) = decode_bencoded_value(&encoded_value[index..])?;
+                        list.push(item);
+                        index += consumed;
+                    }
+                Ok((Value::Array(list), index + 1))
+            }
+            Some(b'd') => {
+                let mut dict = serde_json::Map::new();
+                let mut index = 1;
+                while encoded_value[index] != b'e' {
+                    let (key, key_consumed) = decode_bencoded_value(&encoded_value[index..])?;
+                    index += key_consumed;
+                    let (value, value_consumed) = decode_bencoded_value(&encoded_value[index..])?;
+                    index += value_consumed;
+                    if let Value::String(key) = key {
+                        dict.insert(key, value);
+                    } else {
+                        return Err("Invalid dictionary key".into());
+                    }
+                }
+                Ok((Value::Object(dict), index + 1))
+            }
+            Some(b) if b.is_ascii_digit() => {
+                let colon_index = encoded_value.iter().position(|&b| b == b':')
+                    .ok_or("Invalid string encoding")?;
+                let length: usize = str::from_utf8(&encoded_value[..colon_index])?.parse()?;
+                let start = colon_index + 1;
+                let end = start + length;
+                let string = str::from_utf8(&encoded_value[start..end])?;
+                Ok((Value::String(string.to_string()), end))
+            }
+            _ => Err("Invalid bencode format".into())
+        }
+    }
+/*
 fn decode_integer(encoded_value: &[u8]) -> Result<(Value, usize), Box<dyn std::error::Error>> {
     let end = encoded_value.iter().position(|&b| b == b'e')
         .ok_or("Invalid integer encoding")?;
@@ -76,7 +120,7 @@ fn decode_list(encoded_value: &[u8]) -> Result<(Value, usize), Box<dyn std::erro
     let mut list = Vec::new();
     let mut index = 1;
     while encoded_value[index] != b'e' {
-        let (item, consumed) = decode_bencoded_value_inner(&encoded_value[index..])?;
+        let (item, consumed) = decode_bencoded_value(&encoded_value[index..])?;
         list.push(item);
         index += consumed;
     }
@@ -87,9 +131,9 @@ fn decode_dict(encoded_value: &[u8]) -> Result<(Value, usize), Box<dyn std::erro
     let mut dict = serde_json::Map::new();
     let mut index = 1;
     while encoded_value[index] != b'e' {
-        let (key, key_consumed) = decode_bencoded_value_inner(&encoded_value[index..])?;
+        let (key, key_consumed) = decode_bencoded_value(&encoded_value[index..])?;
         index += key_consumed;
-        let (value, value_consumed) = decode_bencoded_value_inner(&encoded_value[index..])?;
+        let (value, value_consumed) = decode_bencoded_value(&encoded_value[index..])?;
         index += value_consumed;
         if let Value::String(key) = key {
             dict.insert(key, value);
@@ -99,6 +143,7 @@ fn decode_dict(encoded_value: &[u8]) -> Result<(Value, usize), Box<dyn std::erro
     }
     Ok((Value::Object(dict), index + 1))
 }
+    */
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
@@ -112,7 +157,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match command.as_str() {
         "decode" => {
-            let decoded_value = decode_bencoded_value(argument.as_bytes())?;
+            let decoded_value = (decode_bencoded_value(argument.as_bytes())?).0;
             println!("{}", serde_json::to_string(&decoded_value)?);
         },
         "info" => {
