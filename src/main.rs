@@ -41,6 +41,89 @@ impl Torrent {
     }
 }
 
+struct TrackerRequest {
+    url: String,
+    info_hash: String,
+    peer_id: String,
+    port: i16,
+    uploaded: i64,
+    downloaded: i64,
+    left: i64,
+    compact: i16,
+}
+
+impl TrackerRequest {
+    fn new(url: String, info_hash: String, left: i64) -> TrackerRequest {
+        let byte_array: Vec<u8> = hex::decode(info_hash).unwrap();
+        let encoded_hash = TrackerRequest::url_encode(byte_array);
+
+        TrackerRequest {
+            url,
+            info_hash: encoded_hash,
+            peer_id: "TestRTAAA11234567899".to_string(),
+            port: 6881,
+            uploaded: 0,
+            downloaded: 0,
+            left,
+            compact: 1,
+        }
+    }
+
+    fn url_encode(bytes: Vec<u8>) -> String {
+        bytes.iter()
+            .map(|&b| {
+                match b {
+                    b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+                    _=> format!("%{:X}", b)
+                }
+            })
+            .collect::<String>()
+    }
+
+    fn get_response(&self) -> () /*Result<TrackerResponse, Box<Result, std::error::Error>> */{
+        let request_url = format!(
+            "{}?info_hash={}&peer_id={}&port={}&uploaded={}&downloaded={}&left={}&compact={}",
+            self.url,
+            self.info_hash,
+            self.peer_id,
+            self.port,
+            self.uploaded,
+            self.downloaded,
+            self.left,
+            self.compact,
+        );
+        println!("{}", request_url);
+        let response= reqwest::blocking::get(request_url).unwrap();
+        
+        if response.status().is_success() {
+            let bytes = response.bytes().unwrap();
+            match decode_bencoded_value(&bytes) {
+                Ok((decoded, _)) =>
+            }
+
+        } else {
+            println!("HTTP Error");
+        }
+    }
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, Deserialize)]
+struct TrackerResponse {
+    complete: i64,
+    incomplete: i64,
+    interval: i64,
+    #[serde(rename = "min interval")]
+    min_interval: i64,
+    peers: Vec<PeerData>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Serialize, Deserialize)]
+struct PeerData {
+    ip: String,
+    port: i16,
+}
+
 fn decode_bencoded_value(encoded_value: &[u8]) -> Result<(Value, usize), Box<dyn std::error::Error>> {
     match encoded_value.get(0) {
         Some(b'i') => {
@@ -103,6 +186,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let decoded_value = (decode_bencoded_value(argument.as_bytes())?).0;
             println!("{}", serde_json::to_string(&decoded_value)?);
         },
+
         "info" => {
             let torrent = Torrent::new(PathBuf::from(argument))?;
             let info_hash = torrent.info_hash()?;
@@ -113,6 +197,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Piece Length: {}", torrent.info.piece_length);
             println!("Piece Hashes: {}", hex::encode(torrent.info.pieces));
         },
+
+        "peers" => {
+            let torrent = Torrent::new(PathBuf::from(argument))?;
+            let info_hash = torrent.info_hash()?;
+            let request = TrackerRequest::new(torrent.announce, info_hash, torrent.info.length);
+            request.get_response();
+        }
+
         _ => eprintln!("Unknown command: {}", command),
     }
 
