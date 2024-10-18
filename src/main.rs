@@ -185,14 +185,14 @@ impl TrackerResponse {
                 }
             }
         }
-        Ok ((TrackerResponse {
+        Ok (TrackerResponse {
             complete,
             downloaded,
             incomplete,
             interval,
             min_interval,
             peers
-        }))
+        })
     }
 
     fn extract_int(byte_array: &[u8], mut i: usize) -> Result<(i32, usize), Box<dyn std::error::Error>> {
