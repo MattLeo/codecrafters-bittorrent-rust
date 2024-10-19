@@ -1,8 +1,8 @@
 use core::str;
-use std::env;
+use std::{env, net::TcpStream};
 use std::path::PathBuf;
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Write};
 use sha1::{Sha1, Digest};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -297,7 +297,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             for peer in tracker_info.peers {
                 println!("{}:{}", peer.ip, peer.port);
             }
-        }
+        },
+        "handshake" => {
+            let torrent = Torrent::new(PathBuf::from(argument))?;
+            let info_hash = hex::decode(torrent.info_hash()?.as_bytes())?;
+            let protocol = "BitTorrent protocol".as_bytes();
+            let plen = protocol.len() as u8;
+            let reserved: [u8;8] = [0u8; 8];
+            let client_id = "TestRTAAA11234567899".as_bytes();
+            let mut response = [0u8; 68];
+
+            let mut handshake = Vec::new();
+            handshake.push(plen);
+            handshake.extend_from_slice(protocol);
+            handshake.extend_from_slice(&reserved);
+            handshake.extend_from_slice(&info_hash);
+            handshake.extend_from_slice(&client_id);
+
+            let mut stream = TcpStream::connect(&args[3])?;
+            stream.write_all(&handshake)?;
+            stream.read_exact(&mut response)?;
+
+            //println!("Received handshake: {:?}", &response);
+
+            let peer_id = hex::encode(&response[48..]);
+            println!("Peer ID: {}", peer_id);
+        },
 
         _ => eprintln!("Unknown command: {}", command),
     }
