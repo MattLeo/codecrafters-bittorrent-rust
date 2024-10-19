@@ -128,12 +128,10 @@ impl TrackerResponse {
         if byte_array[i] != b'd' {
             return Err("Tracker Response is not a dictionary".into());
         }
-        println!("Received data: {:?}", String::from_utf8_lossy(byte_array));
         i += 1;
         while i < byte_array.len() && byte_array[i] != b'e' {
-            println!("Parsing at index: {}", i);
             let colon_pos = byte_array[i..].iter().position(|&b| b == b':')
-                .ok_or("WHAT.")?;
+                .ok_or("Invalid bencoded message received. Unable to locate key.")?;
             let key_len: usize = std::str::from_utf8(&byte_array[i..i + colon_pos])?
                 .parse()?;
             i += colon_pos + 1;
