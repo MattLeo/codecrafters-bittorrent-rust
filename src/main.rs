@@ -314,43 +314,81 @@ fn calc_block_size(piece_len: u32, block_size: u32, block_index: u32) -> u32 {
 }
 */
 
-fn send_request(stream: &mut TcpStream, piece_index: &u32, block_offset: u32, block_length: u32) -> Result<(), Box<dyn std::error::Error>> {
+fn send_message(message_type: &str, stream: &mut TcpStream, piece_index: &u32, block_offset: u32, block_length: u32) -> Result<(), Box<dyn std::error::Error>> {
     let mut request_message = Vec::new();
-    request_message.extend_from_slice(&(13u32.to_be_bytes()));
-    request_message.push(6);
-    request_message.extend_from_slice(&piece_index.to_be_bytes());
-    request_message.extend_from_slice(&block_offset.to_be_bytes());
-    request_message.extend_from_slice(&block_length.to_be_bytes());
-    stream.write_all(&request_message)?;
+    match message_type {
+        "request" => {
+            request_message.extend_from_slice(&(13u32.to_be_bytes()));
+            request_message.push(6);
+            request_message.extend_from_slice(&piece_index.to_be_bytes());
+            request_message.extend_from_slice(&block_offset.to_be_bytes());
+            request_message.extend_from_slice(&block_length.to_be_bytes());
+            stream.write_all(&request_message)?;
+            Ok(())
+        }
+        "interested" => {
+            request_message.extend_from_slice(&(1u32.to_be_bytes()));
+            request_message.push(2);
+            stream.write_all(&request_message)?;
+            Ok(())
+        }
+        _ => {
+            return Err("No message type provided to function".into());
+        }
 
-    Ok(())
+    }
 }
 
 fn recieve_response(stream: &mut TcpStream) -> Result<Option<(u32, u32, Vec<u8>)>, Box<dyn std::error::Error>> {
     let mut length_prefix = [0u8; 4];
-    if stream.read_exact(&mut length_prefix).is_err() {
-        return Ok(None);
+    let bytes_read = stream.read_exact(&mut length_prefix);
+    if let Err(e) = bytes_read {
+        println!("length prefix is error {:?}", e);
+        (e);
     }
     let length = u32::from_be_bytes(length_prefix);
+    println!("Length prefix received: {}", length);
     if length == 0 {
+        println!("length is 0");
         return Ok(None);
     }
 
     let mut message_id = [0u8; 1];
-    stream.read_exact(&mut message_id)?;
+   read_exact_with_retry(stream,&mut message_id)?;
+   println!("Message ID received: {}", message_id[0]);
     if message_id[0] == 7 {
+        println!("block message received");
         let mut piece_index_bytes = [0u8; 4];
         let mut block_offset_bytes = [0u8; 4];
-        stream.read_exact(&mut piece_index_bytes)?;
-        stream.read_exact(&mut block_offset_bytes)?;
+        read_exact_with_retry(stream, &mut piece_index_bytes)?;
+        read_exact_with_retry(stream, &mut block_offset_bytes)?;
         let piece_index = u32::from_be_bytes(piece_index_bytes);
         let block_offset = u32::from_be_bytes(block_offset_bytes);
         let block_length = length - 9;
         let mut block_data = vec![0u8; block_length as usize];
-        stream.read_exact(&mut block_data)?;
+        read_exact_with_retry(stream, &mut block_data)?;
+        println!("Block data successfully read, size: {}", block_data.len());
         
         Ok(Some((piece_index, block_offset, block_data)))
+    } else if message_id[0] == 1 {
+        println!("unchoke received");
+        Ok(None)
+    } else if message_id[0] ==  5 {
+        let bitfield_length = length - 1;
+        let mut bitfield = vec![0u8; bitfield_length as usize];
+        read_exact_with_retry(stream, &mut bitfield)?;
+        println!("bitfield received");
+        Ok(None)
+    } else if message_id[0] == 8 {
+        println!("cancel received");
+        Ok(None)
+    } else if message_id[0] == 0 {
+        println!("choke received");
+        Ok(None)
     } else {
+        println!("other message is received");
+        let mut other_buffer = vec![0u8; (length -1) as usize];
+        read_exact_with_retry(stream, &mut other_buffer)?;
         Ok(None)
     }
 }
@@ -364,6 +402,32 @@ fn join_blocks( blocks: Vec<(u32, Vec<u8>)>, peice_length: u32,) -> Vec<u8> {
     }
 
     piece_buffer
+}
+
+fn read_exact_with_retry(stream: &mut TcpStream, buf: &mut [u8]) -> std::io::Result<()> {
+    let mut total_read = 0;
+    let mut retries = 0;
+    let max_retries = 3;
+
+    while total_read < buf.len() {
+        match stream.read(&mut buf[total_read..]) {
+            Ok(0) => {
+                return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Stream closed"));
+            }
+            Ok(n) => {
+                total_read += n;
+                if total_read < buf.len() {
+                    retries += 1;
+                    if retries > max_retries {
+                        println!("Failed to fill buffer after {} retries", retries);
+                        return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Failed to fill buffer after retries"));
+                    }
+                }
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -450,18 +514,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut block_offset: u32 = 0;
             let mut pending_requests: usize = 0;
             let mut blocks: Vec<(u32,Vec<u8>)> = Vec::new();
-            
+
+            send_message("interested", &mut stream, piece_index, block_offset, block_size)?;
+            let _unchoke = recieve_response(&mut stream)?;
+
             while block_offset < piece_length as u32 {
-                while pending_requests < max_requests && block_offset < piece_length as u32 {
-                    println!("Sending request {} of {}", pending_requests + 1, max_requests);
-                    send_request(&mut stream, piece_index, block_offset, block_size)?;
-                    pending_requests += 1;
+                if block_offset < piece_length as u32 && pending_requests < max_requests {
+                    println!("Sending request");
+                    send_message("request", &mut stream, piece_index, block_offset, block_size)?;
+                    println!("{} offset of {} total", block_offset, piece_length);
                     block_offset += block_size;
+                    pending_requests += 1
                 }
 
                 match recieve_response(&mut stream)? {
-                    Some((received_piece_index, received_block_offset, block_data)) => {
-                        println!("Received piece {}", received_piece_index);
+                    Some((_received_piece_index, received_block_offset, block_data)) => {
+                        println!("Received block");
                         blocks.push((received_block_offset, block_data));
                         pending_requests -= 1;
                     }
@@ -476,9 +544,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             if torrent_clone.validate_piece(piece_index, full_piece_hash) {
                 file.write_all(&full_piece)?;
-            } //else {
-              //  eprintln!("Recieved piece does not match hash data");
-            //}
+            } else {
+                eprintln!("Recieved piece does not match hash data");
+            }
         } 
 
         _ => eprintln!("Unknown command: {}", command),
