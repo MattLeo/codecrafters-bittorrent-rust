@@ -301,7 +301,7 @@ fn decode_bencoded_value(encoded_value: &[u8]) -> Result<(Value, usize), Box<dyn
         _ => Err("Invalid bencode format".into())
     }
 }
-/*
+
 fn calc_block_size(piece_len: u32, block_size: u32, block_index: u32) -> u32 {
     let full_blocks = piece_len / block_size;
     let last_block = piece_len % block_size;
@@ -312,7 +312,6 @@ fn calc_block_size(piece_len: u32, block_size: u32, block_index: u32) -> u32 {
         last_block
     }
 }
-*/
 
 fn send_message(message_type: &str, stream: &mut TcpStream, piece_index: &u32, block_offset: u32, block_length: u32) -> Result<(), Box<dyn std::error::Error>> {
     let mut request_message = Vec::new();
@@ -344,7 +343,7 @@ fn recieve_response(stream: &mut TcpStream) -> Result<Option<(u32, u32, Vec<u8>)
     let bytes_read = stream.read_exact(&mut length_prefix);
     if let Err(e) = bytes_read {
         println!("length prefix is error {:?}", e);
-        (e);
+        return Ok(None);
     }
     let length = u32::from_be_bytes(length_prefix);
     println!("Length prefix received: {}", length);
@@ -439,7 +438,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     let command = &args[1];
     let argument = &args[2];
-    let block_size: u32 = 16 * 1024;
 
     match command.as_str() {
         "decode" => {
@@ -494,6 +492,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let max_requests = 5;
 
             let torrent = Torrent::new(PathBuf::from(&args[4]))?;
+            let total_file_length = torrent.info.length.clone() as u32;
+            let mut piece_length = torrent.info.piece_length.clone() as u32;
+            let total_pieces = (total_file_length as f64 / piece_length as f64).ceil() as u32;
+            if *piece_index == total_pieces - 1 {
+                let mut last_piece_length = total_file_length % piece_length;
+                if last_piece_length == 0 {
+                    last_piece_length = piece_length;
+                }
+                piece_length = last_piece_length;
+            }
             let torrent_clone = torrent.clone();
             let info_hash = torrent.info_hash()?;
             let info_hash_clone = info_hash.clone();
@@ -504,7 +512,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let handshake = Handshake::new(info_hash_clone, client_id);
             let mut handshake_response = [0u8; 68];
             let peer = &tracker_info.peers[0];
-            let piece_length = torrent.info.piece_length;
             
             let mut stream = TcpStream::connect(format!("{}:{}",peer.ip, peer.port ))?;
             stream.write_all(&handshake.get())?;
@@ -514,9 +521,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut block_offset: u32 = 0;
             let mut pending_requests: usize = 0;
             let mut blocks: Vec<(u32,Vec<u8>)> = Vec::new();
+            let mut block_size: u32 = 16 * 1024;
 
             send_message("interested", &mut stream, piece_index, block_offset, block_size)?;
             let _unchoke = recieve_response(&mut stream)?;
+            let mut block_index = 0;
 
             while block_offset < piece_length as u32 {
                 if block_offset < piece_length as u32 && pending_requests < max_requests {
@@ -524,7 +533,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     send_message("request", &mut stream, piece_index, block_offset, block_size)?;
                     println!("{} offset of {} total", block_offset, piece_length);
                     block_offset += block_size;
-                    pending_requests += 1
+                    pending_requests += 1;
+                    block_index += 1;
+                    block_size = calc_block_size(piece_length, block_size, block_index);
                 }
 
                 match recieve_response(&mut stream)? {
