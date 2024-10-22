@@ -431,16 +431,13 @@ fn read_exact_with_retry(stream: &mut TcpStream, buf: &mut [u8]) -> std::io::Res
 
 fn join_pieces(pieces: Vec<(u32, Vec<u8>)>, file_length: u32) -> Vec<u8> {
     let mut file_buffer = vec![0u8; file_length as usize];
-    let mut sorted_pieces = pieces;
-    sorted_pieces.sort_by_key(|(offset, _)| *offset);
-    let piece_length = sorted_pieces[0].1.len(); 
-    
-    for (piece_index, (_offset, piece_data)) in sorted_pieces.into_iter().enumerate() {
-        let start = piece_index * piece_length;
-        let end = start + piece_data.len();
+    let mut current_offset = 0;
+    for (_piece_offset, piece_data) in pieces {
+        let start = current_offset as usize;
+        let end = start + piece_data.len() as usize;
         file_buffer[start..end].copy_from_slice(&piece_data);
+        current_offset = end;
     }
-    
     file_buffer
 }
 
@@ -454,7 +451,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let command = &args[1];
     let argument = &args[2];
 
-    match command.trim().to_lowercase().as_str() {
+    match command.as_str() {
         "decode" => {
             let decoded_value = (decode_bencoded_value(argument.as_bytes())?).0;
             println!("{}", serde_json::to_string(&decoded_value)?);
@@ -649,7 +646,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let full_piece_hash = hex::encode(hasher.finalize());
     
                 if torrent_clone.validate_piece(&piece_index, full_piece_hash) {
-                    pieces.push(((piece_index * piece_length) as u32, full_piece));
+                    pieces.push((piece_length, full_piece));
                 } else {
                     eprintln!("Recieved piece does not match hash data");
                 }
