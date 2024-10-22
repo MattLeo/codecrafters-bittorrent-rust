@@ -649,7 +649,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let full_piece_hash = hex::encode(hasher.finalize());
     
                 if torrent_clone.validate_piece(&piece_index, full_piece_hash) {
-                    pieces.push((piece_length, full_piece));
+                    pieces.push(((piece_index * piece_length) as u32, full_piece));
                 } else {
                     eprintln!("Recieved piece does not match hash data");
                 }
