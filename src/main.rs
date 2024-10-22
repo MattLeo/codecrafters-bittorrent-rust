@@ -449,15 +449,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let command = &args[1];
     let argument = &args[2];
 
-    let args: Vec<String> = env::args().collect();
-    println!("Number of args: {}", args.len());
-    for (i, arg) in args.iter().enumerate() {
-        println!("Arg {}: '{}' (bytes: {:?})", i, arg, arg.as_bytes());
-    }
-
-    let command = args[1].trim();
-    println!("Command after trim: '{}' (bytes: {:?})", command, command.as_bytes());
-
     match command.trim().to_lowercase().as_str() {
         "decode" => {
             let decoded_value = (decode_bencoded_value(argument.as_bytes())?).0;
