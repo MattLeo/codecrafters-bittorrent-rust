@@ -1,4 +1,6 @@
-use std::{net::TcpStream, io::{Read, Write}};
+use std::{io::{Read, Write}, net::TcpStream};
+
+use crate::{file_utils, torrent, tracker};
 
 #[allow(dead_code)]
 pub struct Handshake {
@@ -63,6 +65,75 @@ pub fn send_message(message_type: &str, stream: &mut TcpStream, piece_index: &u3
         }
 
     }
+}
+
+#[allow(dead_code)]
+pub struct DownloadContext {
+    pub stream: TcpStream,
+    pub piece_length: u32,
+    pub max_requests: usize,
+}
+
+#[allow(dead_code)]
+impl DownloadContext {
+    pub fn new(stream: TcpStream, piece_length: u32, max_requests: usize) -> DownloadContext {
+        DownloadContext {
+            stream,
+            piece_length,
+            max_requests,
+        }
+    }
+
+    pub fn download_piece(&mut self, piece_index: &u32) -> Result<Vec<u8>,Box<dyn std::error::Error>> {
+        let mut block_offset = 0;
+        let mut pending_requests = 0;
+        let mut blocks = Vec::new();
+        let mut block_size = 16 * 1024;
+        let mut block_index = 0;
+
+        while block_offset < self.piece_length {
+            if block_offset < self.piece_length && pending_requests < self.max_requests {
+                println!("Sending request for block {}", block_index);
+                send_message("request", &mut self.stream, &piece_index, block_offset, block_size)?;
+                block_offset += block_size;
+                pending_requests += 1;
+                block_index += 1;
+                block_size = file_utils::calc_block_size(self.piece_length, block_size, block_index);
+            }
+
+            if let Some((_, received_block_offset, block_data)) = 
+                recieve_response(&mut self.stream)? {
+                    println!("Received block data");
+                    blocks.push((received_block_offset, block_data));
+                    pending_requests -= 1;
+            }
+        }
+        Ok(file_utils::join_blocks(blocks, self.piece_length))
+    }
+
+
+}
+
+pub fn setup_connection(torrent: &torrent::Torrent) -> Result<(TcpStream, tracker::TrackerResponse), Box<dyn std::error::Error>> {
+    let info_hash = torrent.info_hash()?;
+    let client_id = "TestRTAAA11234567899".to_string();
+    let request = tracker::TrackerRequest::new(torrent.announce.clone(), info_hash.clone(), torrent.info.length);
+    let response = request.get_response().unwrap();
+    let tracker_info = tracker::TrackerResponse::new(&*response)?;
+
+    let handshake = Handshake::new(info_hash, client_id);
+    let mut handshake_response = [0u8; 68];
+    let peer = &tracker_info.peers[0];
+
+    let mut stream = TcpStream::connect(format!("{}:{}", peer.ip, peer.port))?;
+    stream.write_all(&handshake.get())?;
+    stream.read_exact(&mut handshake_response)?;
+
+    let _bitfield = recieve_response(&mut stream)?;
+    send_message("interested", &mut stream, &0, 0, 0)?;
+    let _unchoke = recieve_response(&mut stream)?;
+
+    Ok((stream, tracker_info))
 }
 
 pub fn recieve_response(stream: &mut TcpStream) -> Result<Option<(u32, u32, Vec<u8>)>, Box<dyn std::error::Error>> {

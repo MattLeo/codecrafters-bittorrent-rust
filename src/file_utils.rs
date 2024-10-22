@@ -62,8 +62,8 @@ pub fn calc_block_size(piece_len: u32, block_size: u32, block_index: u32) -> u32
 }
 
 #[allow(dead_code)]
-pub fn join_blocks(blocks: Vec<(u32, Vec<u8>)>, peice_length: u32) -> Vec<u8> {
-    let mut piece_buffer = vec![0u8; peice_length as usize];
+pub fn join_blocks(blocks: Vec<(u32, Vec<u8>)>, piece_length: u32) -> Vec<u8> {
+    let mut piece_buffer = vec![0u8; piece_length as usize];
     for (block_offset, block_data) in blocks {
         let offset = block_offset as usize;
         let end = offset + block_data.len();

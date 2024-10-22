@@ -7,16 +7,16 @@ pub struct TrackerRequest {
    pub url: String,
    pub info_hash: String,
    pub peer_id: String,
-   pub port: i16,
-   pub uploaded: i64,
-   pub downloaded: i64,
-   pub left: i64,
-   pub compact: i16,
+   pub port: u16,
+   pub uploaded: u32,
+   pub downloaded: u32,
+   pub left: u32,
+   pub compact: u16,
 }
 
 #[allow(dead_code)]
 impl TrackerRequest {
-   pub fn new(url: String, info_hash: String, left: i64) -> TrackerRequest {
+   pub fn new(url: String, info_hash: String, left: u32) -> TrackerRequest {
         let byte_array: Vec<u8> = hex::decode(info_hash).unwrap();
         let encoded_hash = TrackerRequest::url_encode(byte_array);
 
