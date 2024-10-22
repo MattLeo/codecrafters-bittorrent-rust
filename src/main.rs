@@ -431,11 +431,16 @@ fn read_exact_with_retry(stream: &mut TcpStream, buf: &mut [u8]) -> std::io::Res
 
 fn join_pieces(pieces: Vec<(u32, Vec<u8>)>, file_length: u32) -> Vec<u8> {
     let mut file_buffer = vec![0u8; file_length as usize];
-    for (piece_offset, piece_data) in pieces {
-        let start = piece_offset as usize;
-        let end = start + piece_data.len() as usize;
+    let mut sorted_pieces = pieces;
+    sorted_pieces.sort_by_key(|(offset, _)| *offset);
+    let piece_length = sorted_pieces[0].1.len(); 
+    
+    for (piece_index, (_offset, piece_data)) in sorted_pieces.into_iter().enumerate() {
+        let start = piece_index * piece_length;
+        let end = start + piece_data.len();
         file_buffer[start..end].copy_from_slice(&piece_data);
     }
+    
     file_buffer
 }
 
