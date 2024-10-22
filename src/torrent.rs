@@ -40,8 +40,6 @@ impl Torrent {
         let start = *piece_index as usize * 20;
         let meta_hash = &self.info.pieces[start..start + 20];
         let meta_hash_hex = hex::encode(meta_hash);
-        println!("Expected hash at index {}: {:?}", piece_index, meta_hash_hex);
-        println!("Got Hash: {:?}", piece_hash);
         return meta_hash_hex == piece_hash;
     }
 }
