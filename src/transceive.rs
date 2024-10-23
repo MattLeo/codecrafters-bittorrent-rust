@@ -45,7 +45,6 @@ impl Handshake {
         let plen = protocol.len() as u8;
         let infohash = hex::decode(info_hash.as_bytes())
             .expect("Invalid hash received in Handshake");
-        println!("{}", infohash.len());
         let client_id = client.into_bytes();
         let reserved: [u8; 8] = [00, 00, 00, 00, 00, 16, 00, 00];
 
