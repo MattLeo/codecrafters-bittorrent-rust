@@ -66,9 +66,12 @@ impl TrackerRequest {
     }
 
     pub fn magnet_request(url: String, info_hash: String) -> TrackerRequest {
+        let byte_array: Vec<u8> = hex::decode(info_hash).unwrap();
+        let encoded_hash = TrackerRequest::url_encode(byte_array);
+        
         TrackerRequest {
             url,
-            info_hash,
+            info_hash: encoded_hash,
             peer_id: "TestRTAAA11234567899".to_string(),
             port: 6881,
             uploaded: 0,
