@@ -47,7 +47,7 @@ impl Handshake {
             .expect("Invalid hash received in Handshake");
         println!("{}", infohash.len());
         let client_id = client.into_bytes();
-        let reserved: [u8; 8] = [00, 00, 00, 00, 00, 10, 00, 00];
+        let reserved: [u8; 8] = [00, 00, 00, 00, 00, 16, 00, 00];
 
         Handshake {
             plen,

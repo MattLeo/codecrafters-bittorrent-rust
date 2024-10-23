@@ -55,6 +55,7 @@ impl TrackerRequest {
             self.left,
             self.compact,
         );
+
         let response= reqwest::blocking::get(request_url)?;
         
         if response.status().is_success() {
@@ -137,6 +138,9 @@ impl TrackerResponse {
                     (interval, i) = TrackerResponse::extract_int(byte_array, i)?;
                 },
                 "min interval" => {
+                    (min_interval, i) = TrackerResponse::extract_int(byte_array, i)?;
+                },
+                "mininterval" => {
                     (min_interval, i) = TrackerResponse::extract_int(byte_array, i)?;
                 },
                 "peers" => {
