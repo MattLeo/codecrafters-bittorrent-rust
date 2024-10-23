@@ -43,3 +43,42 @@ impl Torrent {
         return meta_hash_hex == piece_hash;
     }
 }
+
+#[allow(dead_code)]
+pub struct MagnetInfo {
+    pub tracker_url: String,
+    pub filename: String,
+    pub info_hash: String,
+}
+
+impl MagnetInfo {
+    pub fn new(encoded_text: &str) -> Result<MagnetInfo, Box<dyn std::error::Error>> {
+        if !encoded_text.starts_with("magnet:?") {
+            return Err("Invalid magnet link".into());
+        }
+        let mut info_hash: Option<&str> = None;
+        let mut filename: Option<&str> = None;
+        let mut tracker_url: Option<&str> = None;
+
+        for param in encoded_text[8..].split("&") {
+            if let Some((key, value)) = param.split_once("=") {
+                match key {
+                   "xt" => { info_hash = Some(&value[9..]); },
+                   "dn" => { filename = Some(value); },
+                   "tr" => { tracker_url = Some(value); },
+                   _ => { return Err("Invalid key found in magnet link".into()); }, 
+                }
+            }
+        }
+
+        let info_hash = info_hash.ok_or("Missing info hash in magnet link")?;
+        let filename = filename.ok_or("Missing filename in magnet link")?;
+        let tracker_url = tracker_url.ok_or("Missing tracker URL in magnet link")?;
+
+        Ok(MagnetInfo {
+            tracker_url: tracker_url.to_string().replace("%3A", ":").replace("%2F", "/"),
+            filename: filename.to_string(),
+            info_hash: info_hash.to_string(),
+        })
+    }
+}

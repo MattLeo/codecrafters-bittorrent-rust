@@ -20,6 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "handshake" => show_handshake(argument, &args[3]).await,
         "download_piece" => download_part(&args[3..]).await,
         "download" => download_full(&args[3..]).await,
+        "magnet_parse" => parse_magnet(argument).await,
         _ => {
             eprintln!("Unknown command: {}", command);
             Ok(())
@@ -103,11 +104,11 @@ async fn download_part(args: &[String]) -> Result<(), Box<dyn std::error::Error>
 
     let mut context = transceive::DownloadContext::new(piece_length, 5);
     let piece_data = {
-        let mut stream = conn.stream.lock().await; // Lock the stream
-        let piece_index = piece_index; // Just use the value, no dereferencing needed
+        let mut stream = conn.stream.lock().await;
+        let piece_index = piece_index;
     
         Box::pin(async move {
-            context.download_piece(&mut *stream, &piece_index).await // Pass &mut TcpStream
+            context.download_piece(&mut *stream, &piece_index).await
         })
         .await?
     };
@@ -163,11 +164,11 @@ async fn download_full(args: &[String]) -> Result<(), Box<dyn std::error::Error>
         }
 
         let piece_data = {
-            let mut stream = conn.stream.lock().await; // Lock the stream
-            let piece_index = piece_index; // Just use the value, no dereferencing needed
+            let mut stream = conn.stream.lock().await;
+            let piece_index = piece_index;
         
             Box::pin(async move {
-                context.download_piece(&mut *stream, &piece_index).await // Pass &mut TcpStream
+                context.download_piece(&mut *stream, &piece_index).await
             })
             .await?
         };
@@ -188,4 +189,13 @@ async fn download_full(args: &[String]) -> Result<(), Box<dyn std::error::Error>
     let full_file = file_utils::join_pieces(pieces, total_file_length);
     File::create(output_path)?.write_all(&full_file)?;
     Ok(())
+}
+
+async fn parse_magnet(argument: &str) -> Result<(), Box<dyn std::error::Error>> {
+ let magnet_info = torrent::MagnetInfo::new(argument)?;
+
+ println!("Tracker URL: {}", magnet_info.tracker_url);
+ println!("Filename: {}", magnet_info.filename);
+ println!("Info Hash: {}", magnet_info.info_hash);
+ Ok(())
 }

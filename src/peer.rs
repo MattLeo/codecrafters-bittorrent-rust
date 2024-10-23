@@ -1,10 +1,8 @@
 use serde::{Deserialize, Serialize};
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream, sync::Mutex};
 use core::str;
-use std::{collections::VecDeque, sync::Arc, time::Duration};
+use std::{collections::VecDeque, sync::Arc, time::Duration, future::Future, pin::Pin};
 use crate::{torrent::Torrent, transceive};
-use std::future::Future;
-use std::pin::Pin;
 
 #[allow(dead_code)]
 #[derive(Debug, Serialize, Deserialize)]
