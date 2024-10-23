@@ -1,8 +1,10 @@
-use std::{env, fs::{self, File}, io::{Read, Write}, net::TcpStream, path::{PathBuf, Path}};
+use std::{env, fs::{self, File}, io::Write, path::{PathBuf, Path}};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use sha1::{Digest, Sha1};
-use bittorrent_starter_rust::{torrent, tracker, transceive, file_utils};
+use bittorrent_starter_rust::{torrent, tracker, transceive, file_utils, peer};
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
         eprint!("Usage: {} <command> <arguments>", args[0]);
@@ -12,12 +14,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let argument = &args[2];
 
     match command.as_str() {
-        "decode" => print_decode(argument),
-        "info" => list_info(argument),
-        "peers" => list_peers(argument),
-        "handshake" => show_handshake(argument, &args[3]),
-        "download_piece" => download_part(&args[3..]),
-        "download" => download_full(&args[3..]),
+        "decode" => print_decode(argument).await,
+        "info" => list_info(argument).await,
+        "peers" => list_peers(argument).await,
+        "handshake" => show_handshake(argument, &args[3]).await,
+        "download_piece" => download_part(&args[3..]).await,
+        "download" => download_full(&args[3..]).await,
         _ => {
             eprintln!("Unknown command: {}", command);
             Ok(())
@@ -25,13 +27,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-fn print_decode(argument: &str) -> Result<(), Box<dyn std::error::Error>> {
+async fn print_decode(argument: &str) -> Result<(), Box<dyn std::error::Error>> {
     let decoded_value = (file_utils::decode_bencoded_value(argument.as_bytes())?).0;
     println!("{}", serde_json::to_string(&decoded_value)?);
     Ok(())
 }
 
-fn list_info(path: &str) -> Result<(), Box<dyn std::error::Error>> {
+async fn list_info(path: &str) -> Result<(), Box<dyn std::error::Error>> {
     let torrent = torrent::Torrent::new(PathBuf::from(path))?;
     let info_hash = torrent.info_hash()?;
 
@@ -43,7 +45,7 @@ fn list_info(path: &str) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn list_peers(path: &str) -> Result<(), Box<dyn std::error::Error>> {
+async fn list_peers(path: &str) -> Result<(), Box<dyn std::error::Error>> {
     let torrent = torrent::Torrent::new(PathBuf::from(path))?;
     let info_hash = torrent.info_hash()?;
     let request = tracker::TrackerRequest::new(torrent.announce, info_hash, torrent.info.length);
@@ -56,21 +58,21 @@ fn list_peers(path: &str) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn show_handshake(path: &str, peer_addr: &str) -> Result<(), Box<dyn std::error::Error>> {
+async fn show_handshake(path: &str, peer_addr: &str) -> Result<(), Box<dyn std::error::Error>> {
     let torrent = torrent::Torrent::new(PathBuf::from(path))?;
     let client_id = "TestRTAAA11234567899".to_string();
     let handshake = transceive::Handshake::new(torrent.info_hash()?, client_id);
     let mut response = [0u8; 68];
 
-    let mut stream = TcpStream::connect(peer_addr)?;
-    stream.write_all(&handshake.get())?;
-    stream.read_exact(&mut response)?;
+    let mut stream = tokio::net::TcpStream::connect(peer_addr).await?;
+    stream.write_all(&handshake.get()).await?;
+    stream.read_exact(&mut response).await?;
 
     println!("Peer ID: {}", hex::encode(&response[48..]));
     Ok(())
 }
 
-fn download_part(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+async fn download_part(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let output_path = Path::new(&args[0]);
     if let Some(parent_dir) = output_path.parent() {
         fs::create_dir_all(parent_dir)?;
@@ -78,32 +80,52 @@ fn download_part(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 
     let piece_index = args[2].parse::<u32>()?;
     let torrent = torrent::Torrent::new(PathBuf::from(&args[1]))?;
-    let (stream, _) = transceive::setup_connection(&torrent)?;
+    let info_hash = torrent.info_hash()?;
+    let request = tracker::TrackerRequest::new(torrent.announce.clone(), info_hash, torrent.info.length);
+    let response = request.get_response()?;
+    let tracker_info = tracker::TrackerResponse::new(&*response)?;
+    let pool = peer::PeerPool::new(5);
 
+    for peer in &tracker_info.peers {
+        if let Err(e) = pool.add_peer(peer, &torrent).await {
+            eprintln!("Failed to add peer {}:{} - {}", peer.ip, peer.port, e);
+            continue;
+        }
+    }
+
+    let conn = pool.get_connection().await.ok_or("No peers avilable")?;
     let piece_length = if piece_index == (torrent.info.length as f64 / torrent.info.piece_length as f64).ceil() as u32 - 1 {
-    let last_piece_length = (torrent.info.length as u32) % (torrent.info.piece_length as u32);
-    if last_piece_length == 0 { torrent.info.piece_length as u32} else {last_piece_length}
+        let last_piece_length = (torrent.info.length as u32) % (torrent.info.piece_length as u32);
+        if last_piece_length == 0 { torrent.info.piece_length as u32 } else { last_piece_length }
     } else {
         torrent.info.piece_length as u32
     };
 
-    let mut context = transceive::DownloadContext::new(stream, piece_length, 5); 
+    let mut context = transceive::DownloadContext::new(piece_length, 5);
+    let piece_data = {
+        let mut stream = conn.stream.lock().await; // Lock the stream
+        let piece_index = piece_index; // Just use the value, no dereferencing needed
+    
+        Box::pin(async move {
+            context.download_piece(&mut *stream, &piece_index).await // Pass &mut TcpStream
+        })
+        .await?
+    };
 
-    let piece_data = context.download_piece(&piece_index)?;
     let mut hasher = Sha1::new();
     hasher.update(&piece_data);
     let piece_hash = hex::encode(hasher.finalize());
+    pool.return_connection(&conn.peer_id, true).await;
 
     if torrent.validate_piece(&piece_index, piece_hash) {
         File::create(output_path)?.write_all(&piece_data)?;
-
         Ok(())
     } else {
-        Err("Received peice does not match hash data".into())
+        Err("Received piece does not match hash data".into())
     }
 }
 
-fn download_full(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+async fn download_full(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let output_path = Path::new(&args[0]);
     if let Some(parent_dir) = output_path.parent() {
         fs::create_dir_all(parent_dir)?;
@@ -112,14 +134,26 @@ fn download_full(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let torrent = torrent::Torrent::new(PathBuf::from(&args[1]))?;
     let total_file_length = torrent.info.length as u32;
     let total_pieces = ((total_file_length as f64) / (torrent.info.piece_length as f64)).ceil() as u32;
+    let info_hash = torrent.info_hash()?;
+    let request = tracker::TrackerRequest::new(torrent.announce.clone(), info_hash, torrent.info.length);
+    let response = request.get_response()?;
+    let tracker_info = tracker::TrackerResponse::new(&*response)?;
+    let pool = peer::PeerPool::new(5);
+    
+    for peer in &tracker_info.peers {
+        if let Err(e) = pool.add_peer(peer, &torrent).await {
+            eprintln!("Failed to add peer {}:{} - {}", peer.ip, peer.port, e);
+            continue;
+        }
+    }
 
-    let (stream, _) = transceive::setup_connection(&torrent)?;
-    let mut pieces  = Vec::new();
-
-    let mut context = transceive::DownloadContext::new(stream, torrent.info.piece_length, 5); 
+    let mut pieces = Vec::new();
+    let mut context = transceive::DownloadContext::new(torrent.info.piece_length, 5);
 
     for piece_index in 0..total_pieces {
-        if piece_index == total_pieces -1 {
+        let conn = pool.get_connection().await.ok_or("No peers available")?;
+
+        if piece_index == total_pieces - 1 {
             let last_piece_length = total_file_length % (torrent.info.piece_length as u32);
             context.piece_length = if last_piece_length == 0 {
                 torrent.info.piece_length as u32
@@ -128,10 +162,21 @@ fn download_full(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             };
         }
 
-        let piece_data = context.download_piece(&piece_index)?;
+        let piece_data = {
+            let mut stream = conn.stream.lock().await; // Lock the stream
+            let piece_index = piece_index; // Just use the value, no dereferencing needed
+        
+            Box::pin(async move {
+                context.download_piece(&mut *stream, &piece_index).await // Pass &mut TcpStream
+            })
+            .await?
+        };
+
         let mut hasher = Sha1::new();
         hasher.update(&piece_data);
         let piece_hash = hex::encode(hasher.finalize());
+
+        pool.return_connection(&conn.peer_id, true).await;
 
         if torrent.validate_piece(&piece_index, piece_hash) {
             pieces.push((context.piece_length, piece_data));
