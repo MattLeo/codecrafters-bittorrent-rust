@@ -129,6 +129,21 @@ impl DownloadContext {
     }
 }
 
+pub struct ExtensionHandshake {
+    pub plen: [u8;4],
+    pub message_id: [u8;1],
+    pub payload: Vec<u8>,
+
+}
+
+impl ExtensionHandshake {
+    pub async fn new() -> ExtensionHandshake {
+        let message_id = [20].to_be_bytes();
+        
+    }
+}
+
+
 pub async fn receive_response(stream: &mut TcpStream) -> Result<Option<(u32, u32, Vec<u8>)>, Box<dyn std::error::Error>> {
     let mut length_prefix = [0u8; 4];
     stream.read_exact(&mut length_prefix).await?;
