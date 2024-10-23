@@ -21,6 +21,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "download_piece" => download_part(&args[3..]).await,
         "download" => download_full(&args[3..]).await,
         "magnet_parse" => parse_magnet(argument).await,
+        "magnet_handshake" => magnet_handshake(argument).await,
         _ => {
             eprintln!("Unknown command: {}", command);
             Ok(())
@@ -198,4 +199,21 @@ async fn parse_magnet(argument: &str) -> Result<(), Box<dyn std::error::Error>> 
  println!("Filename: {}", magnet_info.filename);
  println!("Info Hash: {}", magnet_info.info_hash);
  Ok(())
+}
+
+async fn magnet_handshake(argument: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let magnet_info = torrent::MagnetInfo::new(argument)?;
+    let info_hash = magnet_info.info_hash;
+    let request = tracker::TrackerRequest::magnet_request(magnet_info.tracker_url, info_hash.clone());
+    let tracker_response = tracker::TrackerResponse::new(&*request.get_response()?)?;
+    let handshake = transceive::Handshake::magnet_handshake(info_hash, request.peer_id);
+    let peer = &tracker_response.peers[0];
+    let mut response = [0u8; 68];
+
+    let mut stream = tokio::net::TcpStream::connect(format!("{}:{}", peer.ip, peer.port)).await?;
+    stream.write_all(&handshake.get()).await?;
+    stream.read_exact(&mut response).await?;
+
+    println!("Peer ID: {}", hex::encode(&response[48..]));
+    Ok(())
 }

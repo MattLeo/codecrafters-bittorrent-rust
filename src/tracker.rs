@@ -16,7 +16,7 @@ pub struct TrackerRequest {
 
 #[allow(dead_code)]
 impl TrackerRequest {
-   pub fn new(url: String, info_hash: String, left: u32) -> TrackerRequest {
+    pub fn new(url: String, info_hash: String, left: u32) -> TrackerRequest {
         let byte_array: Vec<u8> = hex::decode(info_hash).unwrap();
         let encoded_hash = TrackerRequest::url_encode(byte_array);
 
@@ -32,7 +32,7 @@ impl TrackerRequest {
         }
     }
 
-   pub fn url_encode(bytes: Vec<u8>) -> String {
+    pub fn url_encode(bytes: Vec<u8>) -> String {
         bytes.iter()
             .map(|&b| {
                 match b {
@@ -43,7 +43,7 @@ impl TrackerRequest {
             .collect::<String>()
     }
 
-   pub fn get_response(&self) -> Result<Box<[u8]>, Box<dyn std::error::Error>> {
+    pub fn get_response(&self) -> Result<Box<[u8]>, Box<dyn std::error::Error>> {
         let request_url = format!(
             "{}?info_hash={}&peer_id={}&port={}&uploaded={}&downloaded={}&left={}&compact={}",
             self.url,
@@ -63,6 +63,19 @@ impl TrackerRequest {
         } else{
             Err(format!("HTTP Error: {}", response.status()).into())
         }        
+    }
+
+    pub fn magnet_request(url: String, info_hash: String) -> TrackerRequest {
+        TrackerRequest {
+            url,
+            info_hash,
+            peer_id: "TestRTAAA11234567899".to_string(),
+            port: 6881,
+            uploaded: 0,
+            downloaded: 0,
+            left: 999,
+            compact: 1,
+        }
     }
 }
 
