@@ -213,6 +213,7 @@ async fn magnet_handshake(argument: &str) -> Result<(), Box<dyn std::error::Erro
     let mut stream = tokio::net::TcpStream::connect(format!("{}:{}", peer.ip, peer.port)).await?;
     stream.write_all(&handshake.get()).await?;
     stream.read_exact(&mut response).await?;
+    stream.write_all(&transceive::get_ext_handshake().await?).await?;
 
     println!("Peer ID: {}", hex::encode(&response[48..]));
     Ok(())

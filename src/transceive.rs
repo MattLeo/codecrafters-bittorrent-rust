@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use crate::file_utils;
@@ -129,19 +130,31 @@ impl DownloadContext {
     }
 }
 
-pub struct ExtensionHandshake {
-    pub plen: [u8;4],
-    pub message_id: [u8;1],
-    pub payload: Vec<u8>,
-
+#[derive(Serialize, Deserialize)]
+pub struct Extensions {
+    pub ut_metadata: u8,
 }
 
-impl ExtensionHandshake {
-    pub async fn new() -> ExtensionHandshake {
-        let message_id = [20].to_be_bytes();
-        
-    }
+#[derive(Serialize, Deserialize)]
+pub struct ExtensionPayload {
+    pub m: Extensions,
 }
+
+pub async fn get_ext_handshake() -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let extensions = Extensions{
+        ut_metadata: 1,
+    };
+    let ser_payload = serde_bencode::to_bytes(&ExtensionPayload {m: extensions,})?;
+    let message_length: u32 = (ser_payload.len() + 2) as u32;
+    let mut buf = Vec::new();
+    buf.extend_from_slice(&message_length.to_be_bytes());
+    buf.push(20);
+    buf.push(0);
+    buf.extend_from_slice(&ser_payload);
+
+    Ok(buf)
+}
+
 
 
 pub async fn receive_response(stream: &mut TcpStream) -> Result<Option<(u32, u32, Vec<u8>)>, Box<dyn std::error::Error>> {
