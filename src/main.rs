@@ -1,4 +1,4 @@
-use std::{env, fs::{self, File}, io::Write, path::{PathBuf, Path}};
+use std::{env, fs::{self, File}, io::Write, path::{Path, PathBuf}};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use sha1::{Digest, Sha1};
 use bittorrent_starter_rust::{torrent, tracker, transceive, file_utils, peer};
@@ -209,12 +209,31 @@ async fn magnet_handshake(argument: &str) -> Result<(), Box<dyn std::error::Erro
     let handshake = transceive::Handshake::magnet_handshake(info_hash, request.peer_id);
     let peer = &tracker_response.peers[0];
     let mut response = [0u8; 68];
-
+    let mut ext_handshake_length  = [0u8;4];
+    
     let mut stream = tokio::net::TcpStream::connect(format!("{}:{}", peer.ip, peer.port)).await?;
     stream.write_all(&handshake.get()).await?;
     stream.read_exact(&mut response).await?;
     stream.write_all(&transceive::get_ext_handshake().await?).await?;
 
+    stream.read_exact(&mut ext_handshake_length).await?;
+    let mut length = u32::from_be_bytes(ext_handshake_length) as usize;
+
+    let mut ext_handsake_response = vec![0u8; length];
+    stream.read_exact(&mut ext_handsake_response).await?;
+
+    if ext_handsake_response[0] != 20 {
+        stream.read_exact(&mut ext_handshake_length).await?;
+        length = u32::from_be_bytes(ext_handshake_length) as usize;
+        
+        ext_handsake_response = vec![0u8; length];
+        stream.read_exact(&mut ext_handsake_response ).await?;
+    }
+
+    let payload = &ext_handsake_response[2..];
+    let (peer_extensions, _) = file_utils::decode_bencoded_value(payload)?;
+
     println!("Peer ID: {}", hex::encode(&response[48..]));
+    println!("Peer Metadata Extension ID: {}", peer_extensions["m"]["ut_metadata"]);
     Ok(())
 }

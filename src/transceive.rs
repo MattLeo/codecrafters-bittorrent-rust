@@ -155,8 +155,6 @@ pub async fn get_ext_handshake() -> Result<Vec<u8>, Box<dyn std::error::Error>> 
     Ok(buf)
 }
 
-
-
 pub async fn receive_response(stream: &mut TcpStream) -> Result<Option<(u32, u32, Vec<u8>)>, Box<dyn std::error::Error>> {
     let mut length_prefix = [0u8; 4];
     stream.read_exact(&mut length_prefix).await?;

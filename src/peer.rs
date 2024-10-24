@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream, sync::Mutex};
 use core::str;
-use std::{collections::VecDeque, sync::Arc, time::Duration, future::Future, pin::Pin};
+use std::{collections::{VecDeque,HashMap}, sync::Arc, time::Duration, future::Future, pin::Pin};
 use crate::{torrent::Torrent, transceive};
 
 #[allow(dead_code)]
@@ -22,6 +22,7 @@ pub struct PeerConnection {
     pub available: bool,
     pub last_used: std::time::Instant,
     pub failed_requests: u32,
+    pub extensions: Option<HashMap<String, u32>>,
 }
 
 #[allow(dead_code)]
@@ -69,6 +70,7 @@ impl PeerPool {
                     available: true,
                     last_used: std::time::Instant::now(),
                     failed_requests: 0,
+                    extensions: None,
                 });
                 Ok(())
             },
