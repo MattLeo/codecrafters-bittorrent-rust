@@ -22,6 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "download" => download_full(&args[3..]).await,
         "magnet_parse" => parse_magnet(argument).await,
         "magnet_handshake" => magnet_handshake(argument).await,
+        "magnet_info" => magnet_metadata(argument).await,
         _ => {
             eprintln!("Unknown command: {}", command);
             Ok(())
@@ -235,5 +236,45 @@ async fn magnet_handshake(argument: &str) -> Result<(), Box<dyn std::error::Erro
 
     println!("Peer ID: {}", hex::encode(&response[48..]));
     println!("Peer Metadata Extension ID: {}", peer_extensions["m"]["ut_metadata"]);
+    Ok(())
+}
+
+async fn magnet_metadata(argument: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let magnet_info = torrent::MagnetInfo::new(argument)?;
+    let info_hash = magnet_info.info_hash;
+    let request = tracker::TrackerRequest::magnet_request(magnet_info.tracker_url, info_hash.clone());
+    let tracker_response = tracker::TrackerResponse::new(&*request.get_response()?)?;
+    let handshake = transceive::Handshake::magnet_handshake(info_hash, request.peer_id);
+    let peer = &tracker_response.peers[0];
+    let mut response = [0u8; 68];
+    let mut ext_handshake_length  = [0u8;4];
+    
+    let mut stream = tokio::net::TcpStream::connect(format!("{}:{}", peer.ip, peer.port)).await?;
+    stream.write_all(&handshake.get()).await?;
+    stream.read_exact(&mut response).await?;
+    stream.write_all(&transceive::get_ext_handshake().await?).await?;
+
+    stream.read_exact(&mut ext_handshake_length).await?;
+    let mut length = u32::from_be_bytes(ext_handshake_length) as usize;
+
+    let mut ext_handsake_response = vec![0u8; length];
+    stream.read_exact(&mut ext_handsake_response).await?;
+
+    if ext_handsake_response[0] != 20 {
+        stream.read_exact(&mut ext_handshake_length).await?;
+        length = u32::from_be_bytes(ext_handshake_length) as usize;
+        
+        ext_handsake_response = vec![0u8; length];
+        stream.read_exact(&mut ext_handsake_response ).await?;
+    }
+
+    let payload = &ext_handsake_response[2..];
+    let (peer_extensions, _) = file_utils::decode_bencoded_value(payload)?;
+
+    if peer_extensions.get("m").and_then(|m| m.get("ut_metadata")).is_some() {
+        let metadata_request = transceive::get_ext_metadata((peer_extensions["m"]["ut_metadata"]).as_u64().unwrap() as u32).await?;
+        stream.write_all(&metadata_request).await?;
+    }
+
     Ok(())
 }

@@ -140,6 +140,12 @@ pub struct ExtensionPayload {
     pub m: Extensions,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct MetaRequestPayload {
+    msg_type: u32,
+    piece: u32,
+}
+
 pub async fn get_ext_handshake() -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let extensions = Extensions{
         ut_metadata: 1,
@@ -151,6 +157,18 @@ pub async fn get_ext_handshake() -> Result<Vec<u8>, Box<dyn std::error::Error>> 
     buf.push(20);
     buf.push(0);
     buf.extend_from_slice(&ser_payload);
+
+    Ok(buf)
+}
+
+pub async fn get_ext_metadata(ext_id: u32) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let request_payload = serde_bencode::to_bytes(&MetaRequestPayload {msg_type: 0, piece: 0})?;
+    let message_length: u32 = (request_payload.len() + 2) as u32;
+    let mut buf = Vec::new();
+    buf.extend_from_slice(&message_length.to_be_bytes());
+    buf.push(20);
+    buf.push(ext_id as u8);
+    buf.extend_from_slice(&request_payload);
 
     Ok(buf)
 }
