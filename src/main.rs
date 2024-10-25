@@ -241,8 +241,8 @@ async fn magnet_handshake(argument: &str) -> Result<(), Box<dyn std::error::Erro
 
 async fn magnet_metadata(argument: &str) -> Result<(), Box<dyn std::error::Error>> {
     let magnet_info = torrent::MagnetInfo::new(argument)?;
-    let info_hash = magnet_info.info_hash;
-    let request = tracker::TrackerRequest::magnet_request(magnet_info.tracker_url, info_hash.clone());
+    let info_hash = magnet_info.info_hash.clone();
+    let request = tracker::TrackerRequest::magnet_request(magnet_info.tracker_url.clone(), info_hash.clone());
     let tracker_response = tracker::TrackerResponse::new(&*request.get_response()?)?;
     let handshake = transceive::Handshake::magnet_handshake(info_hash, request.peer_id);
     let peer = &tracker_response.peers[0];
@@ -274,7 +274,32 @@ async fn magnet_metadata(argument: &str) -> Result<(), Box<dyn std::error::Error
     if peer_extensions.get("m").and_then(|m| m.get("ut_metadata")).is_some() {
         let metadata_request = transceive::get_ext_metadata((peer_extensions["m"]["ut_metadata"]).as_u64().unwrap() as u32).await?;
         stream.write_all(&metadata_request).await?;
+
+        let mut metadata_response_len = [0u8; 4];
+        stream.read_exact(&mut metadata_response_len).await?;
+        length = u32::from_be_bytes(metadata_response_len) as usize;
+        let mut metadata_response = vec![0u8; length];
+        stream.read_exact(&mut metadata_response).await?;
+
+        let piece_payload = &metadata_response[2..];
+        let (bencoded_message, metadata_part) = split_header_and_data(piece_payload).unwrap();
+        let _magnet_piece_info = file_utils::decode_bencoded_value(&bencoded_message)?;
+        let torrent_info = torrent::Torrent::magnet(metadata_part)?;
+
+        println!("Tracker URL: {}", magnet_info.tracker_url);
+        println!("Length: {}", torrent_info.length);
+        println!("Info Hash: {}", magnet_info.info_hash);
+        println!("Piece Length: {}", torrent_info.piece_length);
+        println!("Piece Hashes: {}", hex::encode(torrent_info.pieces));
     }
 
     Ok(())
+}
+
+fn split_header_and_data(message: &[u8]) -> Option<(&[u8], &[u8])> {
+    if let Some(pos) = message.windows(2).position(|window| window == b"ee") {
+        Some((&message[..pos + 2], &message[pos + 2..]))
+    } else {
+        None
+    }
 }

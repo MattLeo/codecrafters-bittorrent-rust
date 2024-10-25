@@ -42,9 +42,15 @@ impl Torrent {
         let meta_hash_hex = hex::encode(meta_hash);
         return meta_hash_hex == piece_hash;
     }
+
+    pub fn magnet(bytes: &[u8]) -> Result<TorrentInfo, Box<dyn std::error::Error>> {
+        let torrent_info: TorrentInfo = serde_bencode::from_bytes(&bytes)?;
+        Ok(torrent_info)
+    }
 }
 
 #[allow(dead_code)]
+#[derive(Clone)]
 pub struct MagnetInfo {
     pub tracker_url: String,
     pub filename: String,
