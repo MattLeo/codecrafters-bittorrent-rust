@@ -1,5 +1,4 @@
 use std::{env, fs::{self, File}, io::Write, path::{Path, PathBuf}};
-
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use sha1::{Digest, Sha1};
 use bittorrent_starter_rust::{torrent, tracker, transceive, file_utils, peer};
@@ -25,6 +24,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "magnet_handshake" => magnet_handshake(argument).await,
         "magnet_info" => magnet_metadata(argument).await,
         "magnet_download_piece" => magnet_download_piece(&args[3..]).await,
+        "magnet_download" => magnet_download(&args[3..]).await,
         _ => {
             eprintln!("Unknown command: {}", command);
             Ok(())
@@ -218,10 +218,8 @@ async fn magnet_handshake(argument: &str) -> Result<(), Box<dyn std::error::Erro
     stream.write_all(&handshake.get()).await?;
     stream.read_exact(&mut response).await?;
     stream.write_all(&transceive::get_ext_handshake().await?).await?;
-
     stream.read_exact(&mut ext_handshake_length).await?;
     let mut length = u32::from_be_bytes(ext_handshake_length) as usize;
-
     let mut ext_handsake_response = vec![0u8; length];
     stream.read_exact(&mut ext_handsake_response).await?;
 
@@ -255,10 +253,8 @@ async fn magnet_metadata(argument: &str) -> Result<(), Box<dyn std::error::Error
     stream.write_all(&handshake.get()).await?;
     stream.read_exact(&mut response).await?;
     stream.write_all(&transceive::get_ext_handshake().await?).await?;
-
     stream.read_exact(&mut ext_handshake_length).await?;
     let mut length = u32::from_be_bytes(ext_handshake_length) as usize;
-
     let mut ext_handsake_response = vec![0u8; length];
     stream.read_exact(&mut ext_handsake_response).await?;
 
@@ -276,7 +272,6 @@ async fn magnet_metadata(argument: &str) -> Result<(), Box<dyn std::error::Error
     if peer_extensions.get("m").and_then(|m| m.get("ut_metadata")).is_some() {
         let metadata_request = transceive::get_ext_metadata((peer_extensions["m"]["ut_metadata"]).as_u64().unwrap() as u32).await?;
         stream.write_all(&metadata_request).await?;
-
         let mut metadata_response_len = [0u8; 4];
         stream.read_exact(&mut metadata_response_len).await?;
         length = u32::from_be_bytes(metadata_response_len) as usize;
@@ -317,10 +312,8 @@ async fn magnet_download_piece(args: &[String]) -> Result<(), Box<dyn std::error
     stream.write_all(&handshake.get()).await?;
     stream.read_exact(&mut response).await?;
     stream.write_all(&transceive::get_ext_handshake().await?).await?;
-
     stream.read_exact(&mut ext_handshake_length).await?;
     let mut length = u32::from_be_bytes(ext_handshake_length) as usize;
-
     let mut ext_handsake_response = vec![0u8; length];
     stream.read_exact(&mut ext_handsake_response).await?;
 
@@ -396,5 +389,121 @@ async fn magnet_download_piece(args: &[String]) -> Result<(), Box<dyn std::error
         }
     }
 
+    Ok(())
+}
+
+async fn magnet_download(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let output_path = Path::new(&args[0]);
+    if let Some(parent_dir) = output_path.parent() {
+        fs::create_dir_all(parent_dir)?;
+    }
+    let magnet_info = torrent::MagnetInfo::new(&args[1])?;
+    let info_hash = magnet_info.info_hash.clone();
+    let request = tracker::TrackerRequest::magnet_request(magnet_info.tracker_url.clone(), info_hash.clone());
+    let tracker_info = tracker::TrackerResponse::new(&*request.get_response()?)?;
+    let handshake = transceive::Handshake::magnet_handshake(info_hash, request.peer_id);
+    let peer = &tracker_info.peers[0];
+    let mut response = [0u8; 68];
+    let mut ext_handshake_length  = [0u8;4];
+    
+    let mut stream = tokio::net::TcpStream::connect(format!("{}:{}", peer.ip, peer.port)).await?;
+    stream.write_all(&handshake.get()).await?;
+    stream.read_exact(&mut response).await?;
+    stream.write_all(&transceive::get_ext_handshake().await?).await?;
+    stream.read_exact(&mut ext_handshake_length).await?;
+    let mut length = u32::from_be_bytes(ext_handshake_length) as usize;
+    let mut ext_handsake_response = vec![0u8; length];
+    stream.read_exact(&mut ext_handsake_response).await?;
+
+    if ext_handsake_response[0] != 20 {
+        stream.read_exact(&mut ext_handshake_length).await?;
+        length = u32::from_be_bytes(ext_handshake_length) as usize;
+        
+        ext_handsake_response = vec![0u8; length];
+        stream.read_exact(&mut ext_handsake_response ).await?;
+    }
+
+    let payload = &ext_handsake_response[2..];
+    let (peer_extensions, _) = file_utils::decode_bencoded_value(payload)?;
+
+    if peer_extensions.get("m").and_then(|m| m.get("ut_metadata")).is_some() {
+        let metadata_request = transceive::get_ext_metadata((peer_extensions["m"]["ut_metadata"]).as_u64().unwrap() as u32).await?;
+        stream.write_all(&metadata_request).await?;
+
+        let mut metadata_response_len = [0u8; 4];
+        stream.read_exact(&mut metadata_response_len).await?;
+        length = u32::from_be_bytes(metadata_response_len) as usize;
+        let mut metadata_response = vec![0u8; length];
+        stream.read_exact(&mut metadata_response).await?;
+
+        let piece_payload = &metadata_response[2..];
+        let (bencoded_message, metadata_part) = file_utils::split_header_and_data(piece_payload).unwrap();
+        let _magnet_piece_info = file_utils::decode_bencoded_value(&bencoded_message)?;
+        let torrent_info = torrent::Torrent::magnet(metadata_part)?;
+
+        let torrent = torrent::Torrent {
+            announce: magnet_info.tracker_url,
+            info: torrent_info,
+        };
+        
+        let total_file_length = torrent.info.length as u32;
+        let total_pieces = ((total_file_length as f64) / (torrent.info.piece_length as f64)).ceil() as u32;
+        let pool = peer::PeerPool::new(5);
+        for peer in &tracker_info.peers {
+            if let Err(e) = pool.add_peer(peer, &torrent).await {
+                eprintln!("Failed to add peer {}:{} - {}", peer.ip, peer.port, e);
+                continue;
+            }
+        }
+
+        let mut pieces= Vec::new();
+
+        for piece_index in 0..total_pieces {
+            let conn = pool.get_connection().await.ok_or("No peers available")?;
+            let piece_length = if piece_index == (torrent.info.length as f64 / torrent.info.piece_length as f64).ceil() as u32 - 1 {
+                let last_piece_length = (torrent.info.length as u32) % (torrent.info.piece_length as u32);
+                if last_piece_length == 0 { torrent.info.piece_length as u32 } else { last_piece_length }
+            } else {
+                torrent.info.piece_length as u32
+            };
+
+            let mut context = transceive::DownloadContext::new(piece_length, 5);
+
+            if piece_index == total_pieces - 1 {
+                let last_piece_length = total_file_length % (torrent.info.piece_length as u32);
+                context.piece_length = if last_piece_length == 0 {
+                    torrent.info.piece_length as u32
+                } else {
+                    last_piece_length
+                };
+            }
+            
+            let piece_data = {
+                let mut stream = conn.stream.lock().await;
+                let piece_index = piece_index;
+            
+                Box::pin(async move {
+                    context.download_piece(&mut *stream, &piece_index).await
+                })
+                .await?
+            };
+    
+            let mut hasher = Sha1::new();
+            hasher.update(&piece_data);
+            let piece_hash = hex::encode(hasher.finalize());
+    
+            pool.return_connection(&conn.peer_id, true).await;
+    
+            if torrent.validate_piece(&piece_index, piece_hash) {
+                pieces.push((context.piece_length, piece_data));
+            } else {
+                return Err("Received piece does not match hash data".into());
+            }
+        }
+    
+        let full_file = file_utils::join_pieces(pieces, total_file_length);
+        File::create(output_path)?.write_all(&full_file)?;
+        return Ok(());
+    }
     Ok(())
 }
