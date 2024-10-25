@@ -42,8 +42,11 @@ pub fn decode_bencoded_value(encoded_value: &[u8]) -> Result<(Value, usize), Box
             let length: usize = str::from_utf8(&encoded_value[..colon_index])?.parse()?;
             let start = colon_index + 1;
             let end = start + length;
-            let string = str::from_utf8(&encoded_value[start..end])?;
-            Ok((Value::String(string.to_string()), end))
+            let string = match str::from_utf8(&encoded_value[start..end]) {
+                Ok(s) => s.to_string(),
+                Err(_) => hex::encode(&encoded_value[start..end])
+            };
+            Ok((Value::String(string), end))
         }
         _ => Err("Invalid bencode format".into())
     }
