@@ -85,3 +85,12 @@ pub fn join_pieces(pieces: Vec<(u32, Vec<u8>)>, file_length: u32) -> Vec<u8> {
     }
     file_buffer
 }
+
+#[allow(dead_code)]
+pub fn split_header_and_data(message: &[u8]) -> Option<(&[u8], &[u8])> {
+    if let Some(pos) = message.windows(2).position(|window| window == b"ee") {
+        Some((&message[..pos + 2], &message[pos + 2..]))
+    } else {
+        None
+    }
+}

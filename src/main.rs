@@ -282,7 +282,7 @@ async fn magnet_metadata(argument: &str) -> Result<(), Box<dyn std::error::Error
         stream.read_exact(&mut metadata_response).await?;
 
         let piece_payload = &metadata_response[2..];
-        let (bencoded_message, metadata_part) = split_header_and_data(piece_payload).unwrap();
+        let (bencoded_message, metadata_part) = file_utils::split_header_and_data(piece_payload).unwrap();
         let _magnet_piece_info = file_utils::decode_bencoded_value(&bencoded_message)?;
         let torrent_info = torrent::Torrent::magnet(metadata_part)?;
 
@@ -294,12 +294,4 @@ async fn magnet_metadata(argument: &str) -> Result<(), Box<dyn std::error::Error
     }
 
     Ok(())
-}
-
-fn split_header_and_data(message: &[u8]) -> Option<(&[u8], &[u8])> {
-    if let Some(pos) = message.windows(2).position(|window| window == b"ee") {
-        Some((&message[..pos + 2], &message[pos + 2..]))
-    } else {
-        None
-    }
 }
